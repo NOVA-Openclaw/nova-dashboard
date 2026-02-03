@@ -1,0 +1,12 @@
+# Credentials
+.htpasswd
+.htaccess
+
+# Runtime data (populated by scripts)
+status.json
+anthropic.json
+system.json
+
+# OS files
+.DS_Store
+Thumbs.db

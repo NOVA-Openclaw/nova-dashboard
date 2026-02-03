@@ -1,0 +1,24 @@
+{
+  "updated": "2026-01-01T00:00:00Z",
+  "source": "Admin API (automated)",
+  "currentMonth": {
+    "month": "2026-01",
+    "spend": 100.00,
+    "limit": 5000,
+    "daysElapsed": 15,
+    "avgDailySpend": 6.67,
+    "projectedMonthly": 200,
+    "resetDate": "2026-02-01"
+  },
+  "allTime": {
+    "since": "2026-01-01",
+    "totalSpend": 100.00
+  },
+  "daily": [
+    {"date": "2026-01-01", "cost": 6.67}
+  ],
+  "alerts": {
+    "projectedOverLimit": false,
+    "message": ""
+  }
+}

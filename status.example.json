@@ -1,0 +1,12 @@
+{
+  "context": {
+    "used": 50000,
+    "total": 200000,
+    "percent": 25
+  },
+  "compactions": 0,
+  "model": "anthropic/claude-sonnet-4",
+  "lastCompaction": null,
+  "updated": "2026-01-01T00:00:00Z",
+  "session": "agent:main:main"
+}
