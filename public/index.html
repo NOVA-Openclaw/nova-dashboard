@@ -1,0 +1,714 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOVA Dashboard ✨</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #e0e0e0;
+      padding: 1.5rem;
+    }
+    .container { max-width: 1200px; margin: 0 auto; }
+    
+    header {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    header img {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      border: 2px solid rgba(0, 217, 255, 0.5);
+    }
+    header h1 {
+      font-size: 1.8rem;
+      background: linear-gradient(90deg, #00d9ff, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .connection-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.85rem;
+      color: #888;
+    }
+    .ws-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ef4444;
+      transition: background 0.3s;
+    }
+    .ws-dot.connected { background: #22c55e; animation: pulse 2s infinite; }
+    .ws-dot.polling { background: #eab308; }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .grid-3col {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 1rem;
+    }
+    .grid-2col {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+    }
+    @media (max-width: 1000px) {
+      .grid-3col { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 700px) {
+      .grid-3col, .grid-2col { grid-template-columns: 1fr; }
+    }
+    
+    .section {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+    .section-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #888;
+      margin-bottom: 0.75rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.75rem;
+    }
+    @media (max-width: 700px) {
+      .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .metric {
+      text-align: center;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 8px;
+    }
+    .metric-label {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      color: #666;
+      margin-bottom: 0.25rem;
+    }
+    .metric-value {
+      font-size: 1.4rem;
+      font-weight: 600;
+      color: #00d9ff;
+    }
+    .metric-value.small { font-size: 1rem; }
+    .metric-value.green { color: #22c55e; }
+    .metric-value.orange { color: #f97316; }
+    .metric-sub { font-size: 0.7rem; color: #555; margin-top: 0.25rem; }
+    
+    .bar {
+      height: 4px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      margin-top: 0.5rem;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+    .bar-fill.cyan { background: linear-gradient(90deg, #10b981, #00d9ff); }
+    .bar-fill.purple { background: linear-gradient(90deg, #8b5cf6, #a855f7); }
+    .bar-fill.orange { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+    
+    /* Activity Feed */
+    .activity-feed {
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    .activity-item {
+      padding: 0.5rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      font-size: 0.8rem;
+      display: flex;
+      gap: 0.5rem;
+      align-items: flex-start;
+    }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-time {
+      color: #555;
+      font-size: 0.7rem;
+      white-space: nowrap;
+    }
+    .activity-tool {
+      font-weight: 600;
+      color: #a855f7;
+    }
+    .activity-args {
+      color: #888;
+      font-family: monospace;
+      font-size: 0.7rem;
+      word-break: break-all;
+    }
+    .risk-badge {
+      font-size: 0.55rem;
+      padding: 0.1rem 0.3rem;
+      border-radius: 3px;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .risk-critical { background: #ef4444; color: white; }
+    .risk-high { background: #f97316; color: white; }
+    .risk-medium { background: #eab308; color: black; }
+    .risk-low { background: #22c55e; color: white; }
+    
+    /* Halt Button */
+    .kill-switch {
+      background: linear-gradient(135deg, #dc2626, #991b1b);
+      border: none;
+      color: white;
+      padding: 0.4rem 0.8rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.7rem;
+      transition: transform 0.1s, box-shadow 0.2s;
+    }
+    .kill-switch:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 20px rgba(220, 38, 38, 0.5);
+    }
+    
+    /* Alerts */
+    .alerts {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .alert {
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      animation: slideIn 0.3s ease;
+      max-width: 300px;
+    }
+    .alert-critical { background: #dc2626; color: white; }
+    .alert-high { background: #ea580c; color: white; }
+    @keyframes slideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+    
+    footer {
+      text-align: center;
+      margin-top: 1rem;
+      color: #555;
+      font-size: 0.8rem;
+    }
+    footer a { color: #00d9ff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="https://nova.dustintrammell.com/dashboard/avatar.png" alt="NOVA">
+      <div>
+        <h1>✨ NOVA Dashboard</h1>
+        <div style="font-size: 0.8rem; color: #666;">Real-time monitoring</div>
+      </div>
+      <div class="connection-status">
+        <div class="ws-dot" id="ws-status"></div>
+        <span id="ws-text">Connecting...</span>
+      </div>
+    </header>
+    
+    <!-- Row 1: Agent Status + Anthropic Today -->
+    <div class="grid-2col">
+      <div class="section">
+        <div class="section-title">
+          <span>Agent Status</span>
+          <button class="kill-switch" onclick="haltGateway()">🛑 HALT</button>
+        </div>
+        <div class="metrics-grid" style="grid-template-columns: repeat(2, 1fr);">
+          <div class="metric">
+            <div class="metric-label">Gateway</div>
+            <div class="metric-value small" id="gateway-status">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Model</div>
+            <div class="metric-value small" id="model">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Context</div>
+            <div class="metric-value" id="context-percent">—</div>
+            <div class="metric-sub"><span id="context-used">—</span> / <span id="context-total">—</span></div>
+            <div class="bar"><div class="bar-fill cyan" id="context-bar" style="width: 0%"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Compactions</div>
+            <div class="metric-value" id="compactions">—</div>
+            <div class="metric-sub" id="last-compaction">Last: —</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <div class="section-title">
+          <span>Anthropic API — Today</span>
+          <span id="anthropic-updated" style="font-size: 0.65rem; color: #555;"></span>
+        </div>
+        <div class="metrics-grid" style="grid-template-columns: repeat(2, 1fr);">
+          <div class="metric">
+            <div class="metric-label">Cost</div>
+            <div class="metric-value green">$<span id="api-cost-today">—</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Cache Hit</div>
+            <div class="metric-value" id="api-cache">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Tokens In</div>
+            <div class="metric-value small" id="api-input-today">—</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Tokens Out</div>
+            <div class="metric-value small" id="api-output-today">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Row 2: System Metrics + Monthly Budget -->
+    <div class="grid-2col">
+      <div class="section">
+        <div class="section-title">
+          <span>System Metrics</span>
+          <span id="system-updated" style="font-size: 0.65rem; color: #555;"></span>
+        </div>
+        <div class="metrics-grid">
+          <div class="metric">
+            <div class="metric-label">CPU</div>
+            <div class="metric-value" id="cpu-load">—</div>
+            <div class="metric-sub"><span id="cpu-cores">—</span> cores</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Memory</div>
+            <div class="metric-value" id="mem-percent">—</div>
+            <div class="metric-sub"><span id="mem-used">—</span>/<span id="mem-total">—</span>GB</div>
+            <div class="bar"><div class="bar-fill purple" id="mem-bar" style="width: 0%"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Disk</div>
+            <div class="metric-value" id="disk-percent">—</div>
+            <div class="metric-sub"><span id="disk-used">—</span>/<span id="disk-total">—</span>GB</div>
+            <div class="bar"><div class="bar-fill orange" id="disk-bar" style="width: 0%"></div></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Network</div>
+            <div class="metric-value small" style="color: #22c55e;">↓<span id="net-rx">0</span></div>
+            <div class="metric-sub" style="color: #f97316;">↑<span id="net-tx">0</span></div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <div class="section-title">
+          <span>Monthly Budget</span>
+          <span id="budget-month" style="font-size: 0.65rem; color: #555;">Feb 2026</span>
+        </div>
+        <div class="metrics-grid" style="grid-template-columns: repeat(2, 1fr);">
+          <div class="metric">
+            <div class="metric-label">MTD Spend</div>
+            <div class="metric-value green">$<span id="api-mtd">—</span></div>
+            <div class="metric-sub">of $<span id="api-limit">5,000</span></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Daily Avg</div>
+            <div class="metric-value">$<span id="api-daily-avg">—</span></div>
+            <div class="metric-sub"><span id="api-days">—</span> days</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Projected</div>
+            <div class="metric-value" id="api-projected-container">$<span id="api-projected">—</span></div>
+            <div class="metric-sub" id="api-alert"></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">All-Time $</div>
+            <div class="metric-value green">$<span id="api-cost-total">—</span></div>
+            <div class="metric-sub">since <span id="api-since">Jan 30</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Row 3: Anthropic All-Time (tokens) -->
+    <div class="section">
+      <div class="section-title">
+        <span>Anthropic API — All Time</span>
+        <span style="font-size: 0.65rem; color: #555;">(since Jan 30)</span>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric">
+          <div class="metric-label">Total Cost</div>
+          <div class="metric-value green">$<span id="api-cost-alltime">—</span></div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Cache Hit</div>
+          <div class="metric-value" id="api-cache-total">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Tokens In</div>
+          <div class="metric-value small" id="api-input-total">—</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Tokens Out</div>
+          <div class="metric-value small" id="api-output-total">—</div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Row 3: Activity Feed -->
+    <div class="section">
+      <div class="section-title">
+        <span>Activity Feed</span>
+        <span id="activity-count" style="font-size: 0.65rem; color: #555;">0 events</span>
+      </div>
+      <div class="activity-feed" id="activity-feed">
+        <div style="color: #555; text-align: center; padding: 2rem;">
+          Waiting for activity...
+        </div>
+      </div>
+    </div>
+    
+    <footer>
+      <a href="https://nova.dustintrammell.com">nova.dustintrammell.com</a> · 
+      NOVA Dashboard v2.0
+    </footer>
+  </div>
+  
+  <div class="alerts" id="alerts"></div>
+  
+  <script>
+    let ws = null;
+    let activities = [];
+    let reconnectTimeout = null;
+    let pollInterval = null;
+    let usePolling = false;
+    const MAX_ACTIVITIES = 50;
+    const POLL_INTERVAL = 10000; // 10s fallback polling
+    
+    // Static JSON URLs (relative to current path - no leading slash)
+    const STATIC_BASE = '.';
+    
+    function formatBytes(bytes) {
+      if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + 'G';
+      if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + 'M';
+      if (bytes >= 1e3) return (bytes / 1e3).toFixed(1) + 'K';
+      return bytes + 'B';
+    }
+    
+    function formatTime(ts) {
+      const d = new Date(ts);
+      return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+    
+    function timeAgo(date) {
+      const mins = Math.round((Date.now() - new Date(date)) / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + 'm ago';
+      const hrs = Math.round(mins / 60);
+      if (hrs < 24) return hrs + 'h ago';
+      return Math.round(hrs / 24) + 'd ago';
+    }
+    
+    // === WebSocket Connection ===
+    function connect() {
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${location.host}${location.pathname}`;
+      
+      try {
+        ws = new WebSocket(wsUrl);
+      } catch (e) {
+        console.log('WebSocket not available, falling back to polling');
+        startPolling();
+        return;
+      }
+      
+      ws.onopen = () => {
+        document.getElementById('ws-status').classList.add('connected');
+        document.getElementById('ws-status').classList.remove('polling');
+        document.getElementById('ws-text').textContent = 'Live';
+        usePolling = false;
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        
+        // Load static data (context, anthropic) even when WebSocket is live
+        loadStaticData();
+        // Keep polling static files (context updates via cron, not WebSocket)
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(loadStaticData, POLL_INTERVAL);
+      };
+      
+      ws.onclose = () => {
+        document.getElementById('ws-status').classList.remove('connected');
+        document.getElementById('ws-text').textContent = 'Reconnecting...';
+        reconnectTimeout = setTimeout(() => {
+          // After 3 failed attempts, switch to polling
+          if (!usePolling) {
+            startPolling();
+          } else {
+            connect();
+          }
+        }, 3000);
+      };
+      
+      ws.onerror = () => {
+        ws.close();
+      };
+      
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        handleMessage(msg);
+      };
+    }
+    
+    // === Polling Fallback ===
+    function startPolling() {
+      usePolling = true;
+      document.getElementById('ws-status').classList.remove('connected');
+      document.getElementById('ws-status').classList.add('polling');
+      document.getElementById('ws-text').textContent = 'Polling';
+      
+      // Initial load
+      loadStaticData();
+      
+      // Poll every 10s
+      if (pollInterval) clearInterval(pollInterval);
+      pollInterval = setInterval(loadStaticData, POLL_INTERVAL);
+    }
+    
+    async function loadStaticData() {
+      try {
+        // Try local API first
+        const statusRes = await fetch('/api/status').catch(() => null);
+        if (statusRes && statusRes.ok) {
+          const data = await statusRes.json();
+          if (data.system) updateSystem(data.system);
+          if (data.gateway) updateGateway({ gateway: data.gateway });
+        }
+      } catch (e) {}
+      
+      // Load static JSON files
+      try {
+        const [statusData, anthropicData] = await Promise.all([
+          fetch(STATIC_BASE + '/status.json?' + Date.now()).then(r => r.json()).catch(() => null),
+          fetch(STATIC_BASE + '/anthropic.json?' + Date.now()).then(r => r.json()).catch(() => null),
+        ]);
+        
+        if (statusData) {
+          document.getElementById('model').textContent = statusData.model?.split('/').pop() || '—';
+          document.getElementById('compactions').textContent = statusData.compactions ?? '—';
+          document.getElementById('context-percent').textContent = (statusData.context?.percent ?? '—') + '%';
+          document.getElementById('context-used').textContent = ((statusData.context?.used || 0) / 1000).toFixed(0) + 'k';
+          document.getElementById('context-total').textContent = ((statusData.context?.total || 0) / 1000).toFixed(0) + 'k';
+          document.getElementById('context-bar').style.width = (statusData.context?.percent ?? 0) + '%';
+          if (statusData.lastCompaction) {
+            document.getElementById('last-compaction').textContent = 'Last: ' + timeAgo(statusData.lastCompaction);
+          }
+        }
+        
+        if (anthropicData) {
+          updateAnthropic(anthropicData);
+        }
+      } catch (e) {
+        console.error('Static data load error:', e);
+      }
+    }
+    
+    function handleMessage(msg) {
+      switch (msg.type) {
+        case 'system':
+          updateSystem(msg.data);
+          break;
+        case 'status':
+          updateGateway(msg.data);
+          break;
+        case 'activity':
+          addActivity(msg.data);
+          break;
+        case 'alert':
+          showAlert(msg.data);
+          break;
+        case 'cost':
+          // Update running cost if we want live cost tracking
+          break;
+      }
+    }
+    
+    function updateSystem(data) {
+      if (data.cpu) {
+        document.getElementById('cpu-load').textContent = data.cpu.load + '%';
+        document.getElementById('cpu-cores').textContent = data.cpu.cores;
+      }
+      if (data.memory) {
+        document.getElementById('mem-percent').textContent = data.memory.percent + '%';
+        document.getElementById('mem-used').textContent = data.memory.usedGB;
+        document.getElementById('mem-total').textContent = data.memory.totalGB;
+        document.getElementById('mem-bar').style.width = data.memory.percent + '%';
+      }
+      if (data.disk) {
+        document.getElementById('disk-percent').textContent = data.disk.percent + '%';
+        document.getElementById('disk-used').textContent = data.disk.usedGB;
+        document.getElementById('disk-total').textContent = data.disk.totalGB;
+        document.getElementById('disk-bar').style.width = data.disk.percent + '%';
+      }
+      if (data.network) {
+        document.getElementById('net-rx').textContent = formatBytes(data.network.rxSec) + '/s';
+        document.getElementById('net-tx').textContent = formatBytes(data.network.txSec) + '/s';
+      }
+      document.getElementById('system-updated').textContent = formatTime(Date.now());
+    }
+    
+    function updateGateway(data) {
+      const el = document.getElementById('gateway-status');
+      if (data.gateway === 'running') {
+        el.textContent = '🟢 Online';
+        el.style.color = '#22c55e';
+      } else if (data.gateway === 'killed') {
+        el.textContent = '🔴 HALTED';
+        el.style.color = '#ef4444';
+      } else {
+        el.textContent = '🔴 Offline';
+        el.style.color = '#ef4444';
+      }
+    }
+    
+    function updateAnthropic(data) {
+      if (data.today) {
+        document.getElementById('api-cost-today').textContent = data.today.costDollars?.toFixed(2) ?? '—';
+        document.getElementById('api-input-today').textContent = ((data.today.inputTokens || 0) / 1e6).toFixed(1) + 'M';
+        document.getElementById('api-output-today').textContent = ((data.today.outputTokens || 0) / 1e3).toFixed(0) + 'K';
+        document.getElementById('api-cache').textContent = (data.today.cacheHitRate?.toFixed(1) ?? '—') + '%';
+      }
+      if (data.currentMonth) {
+        const cm = data.currentMonth;
+        document.getElementById('api-mtd').textContent = cm.spend?.toFixed(2) ?? '—';
+        document.getElementById('api-limit').textContent = cm.limit?.toLocaleString() ?? '5,000';
+        document.getElementById('api-daily-avg').textContent = cm.avgDailySpend?.toFixed(2) ?? '—';
+        document.getElementById('api-days').textContent = cm.daysElapsed ?? '—';
+        document.getElementById('api-projected').textContent = cm.projectedMonthly?.toLocaleString() ?? '—';
+        if (cm.month) {
+          const monthDate = new Date(cm.month + '-01');
+          document.getElementById('budget-month').textContent = monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+        }
+        // Alert styling if over budget
+        const projContainer = document.getElementById('api-projected-container');
+        const alertEl = document.getElementById('api-alert');
+        if (data.alerts?.projectedOverLimit) {
+          projContainer.style.color = '#ff6b6b';
+          alertEl.textContent = '⚠️ Over limit!';
+          alertEl.style.color = '#ff6b6b';
+        } else {
+          projContainer.style.color = '';
+          alertEl.textContent = '';
+        }
+      }
+      if (data.allTime) {
+        document.getElementById('api-cost-total').textContent = data.allTime.costDollars?.toFixed(2) ?? '—';
+        document.getElementById('api-cost-alltime').textContent = data.allTime.costDollars?.toFixed(2) ?? '—';
+        document.getElementById('api-since').textContent = data.allTime.since ?? 'Jan 30';
+        document.getElementById('api-input-total').textContent = ((data.allTime.inputTokens || 0) / 1e6).toFixed(1) + 'M';
+        document.getElementById('api-output-total').textContent = ((data.allTime.outputTokens || 0) / 1e6).toFixed(2) + 'M';
+        document.getElementById('api-cache-total').textContent = (data.allTime.cacheHitRate?.toFixed(1) ?? '—') + '%';
+      }
+      if (data.updated) {
+        document.getElementById('anthropic-updated').textContent = timeAgo(data.updated);
+      }
+    }
+    
+    function addActivity(data) {
+      activities.unshift(data);
+      if (activities.length > MAX_ACTIVITIES) {
+        activities = activities.slice(0, MAX_ACTIVITIES);
+      }
+      renderActivities();
+    }
+    
+    function renderActivities() {
+      const feed = document.getElementById('activity-feed');
+      document.getElementById('activity-count').textContent = activities.length + ' events';
+      
+      if (activities.length === 0) {
+        feed.innerHTML = '<div style="color: #555; text-align: center; padding: 2rem;">Waiting for activity...</div>';
+        return;
+      }
+      
+      feed.innerHTML = activities.map(a => `
+        <div class="activity-item">
+          <span class="activity-time">${formatTime(a.timestamp)}</span>
+          <span class="risk-badge risk-${a.risk}">${a.risk}</span>
+          <span class="activity-tool">${a.tool}</span>
+          <span class="activity-args">${JSON.stringify(a.args || {}).slice(0, 60)}...</span>
+        </div>
+      `).join('');
+    }
+    
+    function showAlert(data) {
+      const alerts = document.getElementById('alerts');
+      const alert = document.createElement('div');
+      alert.className = `alert alert-${data.level}`;
+      alert.textContent = data.message;
+      alerts.appendChild(alert);
+      
+      setTimeout(() => {
+        alert.style.opacity = '0';
+        setTimeout(() => alert.remove(), 300);
+      }, 5000);
+    }
+    
+    function haltGateway() {
+      if (confirm('🛑 HALT the gateway? This will stop all agent activity.')) {
+        fetch('/api/kill', { method: 'POST' })
+          .then(r => r.json())
+          .then(() => showAlert({ level: 'critical', message: 'Gateway halted!' }))
+          .catch(() => alert('Halt failed - try manually'));
+      }
+    }
+    
+    // === Initialize ===
+    // Try WebSocket first, fall back to polling
+    connect();
+    
+    // Also load static data immediately (for Anthropic stats which aren't in WS yet)
+    loadStaticData();
+    
+    // Refresh static data periodically even with WS (for Anthropic stats)
+    setInterval(() => {
+      fetch(STATIC_BASE + '/anthropic.json?' + Date.now())
+        .then(r => r.json())
+        .then(updateAnthropic)
+        .catch(() => {});
+    }, 60000); // Every minute
+  </script>
+</body>
+</html>
