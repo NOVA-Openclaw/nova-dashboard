@@ -155,51 +155,31 @@
       </div>
     </div>
 
-    <!-- Anthropic API Stats - Today -->
-    <div class="section-title"><span>Anthropic API — Today</span><span class="timestamp" id="anthropic-updated"></span></div>
+    <!-- Anthropic API Stats - Current Month -->
+    <div class="section-title"><span>Anthropic API — <span id="api-month">Month</span></span><span class="timestamp" id="anthropic-updated"></span></div>
     <div class="grid">
       <div class="card">
-        <h3>Cost</h3>
-        <div class="value">$<span id="api-cost-today">—</span></div>
+        <h3>MTD Spend</h3>
+        <div class="value">$<span id="api-cost-mtd">—</span></div>
+        <div class="sub">of $<span id="api-limit">—</span> limit</div>
       </div>
       
       <div class="card">
-        <h3>Tokens In</h3>
-        <div class="value small" id="api-input-today">—</div>
+        <h3>Daily Avg</h3>
+        <div class="value">$<span id="api-daily-avg">—</span></div>
+        <div class="sub"><span id="api-days-elapsed">—</span> days</div>
       </div>
       
       <div class="card">
-        <h3>Tokens Out</h3>
-        <div class="value small" id="api-output-today">—</div>
+        <h3>Projected</h3>
+        <div class="value" id="api-projected-container">$<span id="api-projected">—</span></div>
+        <div class="sub" id="api-alert"></div>
       </div>
       
       <div class="card">
-        <h3>Cache Hit Rate</h3>
-        <div class="value"><span id="api-cache">—</span>%</div>
-      </div>
-    </div>
-
-    <!-- Anthropic API Stats - All Time -->
-    <div class="section-title"><span>Anthropic API — All Time</span><span class="timestamp">(since Jan 1)</span></div>
-    <div class="grid">
-      <div class="card">
-        <h3>Cost</h3>
+        <h3>All-Time</h3>
         <div class="value">$<span id="api-cost-total">—</span></div>
-      </div>
-      
-      <div class="card">
-        <h3>Tokens In</h3>
-        <div class="value small" id="api-input-total">—</div>
-      </div>
-      
-      <div class="card">
-        <h3>Tokens Out</h3>
-        <div class="value small" id="api-output-total">—</div>
-      </div>
-      
-      <div class="card">
-        <h3>Cache Hit Rate</h3>
-        <div class="value"><span id="api-cache-total">—</span>%</div>
+        <div class="sub">since <span id="api-since">Jan 30</span></div>
       </div>
     </div>
 
@@ -339,17 +319,30 @@
         const res = await fetch('anthropic.json?' + Date.now());
         const data = await res.json();
         
-        // Today's stats
-        document.getElementById('api-cost-today').textContent = data.today?.costDollars?.toFixed(2) ?? '—';
-        document.getElementById('api-input-today').textContent = ((data.today?.inputTokens ?? 0) / 1e6).toFixed(1) + 'M';
-        document.getElementById('api-output-today').textContent = ((data.today?.outputTokens ?? 0) / 1e3).toFixed(0) + 'K';
-        document.getElementById('api-cache').textContent = data.today?.cacheHitRate?.toFixed(1) ?? '—';
+        // Current month stats
+        const cm = data.currentMonth || {};
+        document.getElementById('api-month').textContent = cm.month ? new Date(cm.month + '-01').toLocaleString('en-US', {month: 'short', year: 'numeric'}) : 'Month';
+        document.getElementById('api-cost-mtd').textContent = cm.spend?.toFixed(2) ?? '—';
+        document.getElementById('api-limit').textContent = cm.limit?.toLocaleString() ?? '—';
+        document.getElementById('api-daily-avg').textContent = cm.avgDailySpend?.toFixed(2) ?? '—';
+        document.getElementById('api-days-elapsed').textContent = cm.daysElapsed ?? '—';
+        document.getElementById('api-projected').textContent = cm.projectedMonthly?.toLocaleString() ?? '—';
+        
+        // Alert styling if over budget
+        const projContainer = document.getElementById('api-projected-container');
+        const alertEl = document.getElementById('api-alert');
+        if (data.alerts?.projectedOverLimit) {
+          projContainer.style.color = '#ff6b6b';
+          alertEl.textContent = '⚠️ Over limit!';
+          alertEl.style.color = '#ff6b6b';
+        } else {
+          projContainer.style.color = '';
+          alertEl.textContent = '';
+        }
         
         // All-time stats
-        document.getElementById('api-cost-total').textContent = data.allTime?.costDollars?.toFixed(2) ?? '—';
-        document.getElementById('api-input-total').textContent = ((data.allTime?.inputTokens ?? 0) / 1e6).toFixed(0) + 'M';
-        document.getElementById('api-output-total').textContent = ((data.allTime?.outputTokens ?? 0) / 1e6).toFixed(2) + 'M';
-        document.getElementById('api-cache-total').textContent = data.allTime?.cacheHitRate?.toFixed(1) ?? '—';
+        document.getElementById('api-cost-total').textContent = data.allTime?.totalSpend?.toFixed(2) ?? '—';
+        document.getElementById('api-since').textContent = data.allTime?.since ?? 'Jan 30';
         
         if (data.updated) {
           const d = new Date(data.updated);
