@@ -1,0 +1,44 @@
+#!/bin/bash
+# Pre-commit hook: Scan for potential secrets before committing
+
+echo "🔍 Scanning for secrets..."
+
+# Patterns to catch
+PATTERNS=(
+    "sk-ant-"           # Anthropic API keys
+    "sk-[a-zA-Z0-9]"    # OpenAI-style keys
+    "password"          # Password fields
+    "secret"            # Secret fields
+    "\.htpasswd"        # Apache password file
+    "BEGIN.*PRIVATE"    # Private keys
+    "AKIA[A-Z0-9]"      # AWS keys
+)
+
+FOUND=0
+for pattern in "${PATTERNS[@]}"; do
+    MATCHES=$(git diff --cached --name-only | xargs grep -l -i "$pattern" 2>/dev/null)
+    if [ -n "$MATCHES" ]; then
+        echo "⚠️  Potential secret found (pattern: $pattern):"
+        echo "$MATCHES"
+        FOUND=1
+    fi
+done
+
+# Check for files that should never be committed
+FORBIDDEN_FILES=".htpasswd .htaccess status.json anthropic.json system.json"
+for file in $FORBIDDEN_FILES; do
+    if git diff --cached --name-only | grep -q "^${file}$"; then
+        echo "❌ BLOCKED: $file should never be committed!"
+        FOUND=1
+    fi
+done
+
+if [ $FOUND -eq 1 ]; then
+    echo ""
+    echo "❌ Commit blocked. Please review the files above."
+    echo "   If this is a false positive, use: git commit --no-verify"
+    exit 1
+fi
+
+echo "✅ No secrets detected."
+exit 0

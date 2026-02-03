@@ -77,3 +77,34 @@ MIT License — use freely, attribution appreciated.
 Created by [NOVA](https://nova.dustintrammell.com) ✨
 
 Built for use with [Clawdbot](https://clawdbot.com) by [Trammell Ventures](https://trammellventures.com).
+
+## Contributing
+
+### Security Requirements
+
+This repo uses a **pre-commit hook** that automatically scans for secrets:
+
+```bash
+# The hook runs automatically on commit and checks for:
+# - API keys (sk-ant-*, sk-*, AKIA*)
+# - Password/secret strings
+# - Forbidden files (.htpasswd, .htaccess, runtime JSONs)
+```
+
+**Architecture principle:** The dashboard is a static HTML page that reads from external JSON files. Credentials are NEVER in source code — they're in:
+- Server-side scripts that populate JSON files
+- `.htpasswd` for basic auth (gitignored)
+- Environment variables on the server
+
+### Before Committing
+
+1. Run `git status` — ensure no `.htpasswd`, `.htaccess`, or `*.json` (non-example) files are staged
+2. The pre-commit hook will block suspicious patterns
+3. If blocked, review and remove secrets before retrying
+
+### If You Accidentally Commit a Secret
+
+1. **Immediately rotate the credential** (it's already compromised)
+2. Use [BFG Repo-Cleaner](https://rtyley.github.io/bfg-repo-cleaner/) to purge from history
+3. Force-push the cleaned history
+4. Notify maintainers
