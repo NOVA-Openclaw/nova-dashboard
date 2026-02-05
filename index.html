@@ -195,6 +195,12 @@
       </div>
       
       <div class="card">
+        <h3>Cost/Hr (Clock)</h3>
+        <div class="value">$<span id="api-cph-clock">—</span></div>
+        <div class="sub"><span id="api-clock-hours">—</span>h elapsed</div>
+      </div>
+      
+      <div class="card">
         <h3>Cache Hit Rate</h3>
         <div class="value"><span id="api-cache-rate">—</span>%</div>
         <div class="sub">all-time</div>
@@ -372,6 +378,8 @@
         const cph = data.costPerHour || {};
         document.getElementById('api-cph-working').textContent = cph.working?.toFixed(2) ?? '—';
         document.getElementById('api-active-hours').textContent = cph.activeHoursMonth?.toFixed(1) ?? '—';
+        document.getElementById('api-cph-clock').textContent = cph.wallClock?.toFixed(2) ?? '—';
+        document.getElementById('api-clock-hours').textContent = cph.wallClockHoursMonth ?? '—';
         
         // Cache hit rate
         document.getElementById('api-cache-rate').textContent = data.allTime?.cacheHitRate?.toFixed(1) ?? '—';
