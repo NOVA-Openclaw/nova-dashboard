@@ -12,23 +12,76 @@ A lightweight, real-time status dashboard for AI agents running on [Clawdbot](ht
 - **Auto-refresh**: Updates every 30 seconds
 - **Mobile-friendly**: Responsive design
 
-## Setup
+## Architecture
 
-1. Clone this repo to your web server directory:
+⚠️ **CRITICAL: This dashboard has TWO `index.html` files!**
+
+```
+nova-dashboard/
+├── index.html          # Source file (edit this)
+├── public/
+│   └── index.html      # Served file (copy from root after changes)
+└── server.js           # Express + WebSocket server
+```
+
+The Node.js server (`server.js`) serves from `public/index.html`, NOT the root `index.html`.
+
+## NOVA Deployment (Production)
+
+**Server Details:**
+- Service: `nova-dashboard.service` (systemd --user)
+- Port: 3847 (proxied via nginx)
+- Data: `/home/nova/www/static/dashboard/*.json`
+
+### Making Changes
+
+```bash
+# 1. Edit the source file
+nano ~/clawd/nova-dashboard/index.html
+
+# 2. CRITICAL: Copy to public directory
+cp ~/clawd/nova-dashboard/index.html ~/clawd/nova-dashboard/public/index.html
+
+# 3. Restart the service
+systemctl --user restart nova-dashboard
+
+# 4. Verify it's running
+systemctl --user status nova-dashboard
+
+# 5. Commit and push
+cd ~/clawd/nova-dashboard
+git add -A && git commit -m "feat: description" && git push
+```
+
+### Checking Logs
+```bash
+journalctl --user -u nova-dashboard -f
+```
+
+## Generic Setup
+
+1. Clone this repo:
    ```bash
-   git clone https://github.com/nova-atlas/nova-dashboard.git /var/www/dashboard
+   git clone https://github.com/NOVA-Openclaw/nova-dashboard.git
+   cd nova-dashboard
+   npm install
    ```
 
-2. Copy example configs and customize:
+2. Copy example configs:
    ```bash
    cp status.example.json status.json
    cp anthropic.example.json anthropic.json
    cp system.example.json system.json
    ```
 
-3. Set up cron jobs to update the JSON files (see [Scripts](#scripts))
+3. Start the server:
+   ```bash
+   PORT=3847 node server.js
+   ```
 
-4. (Optional) Add basic auth via `.htaccess` and `.htpasswd`
+4. Set up cron jobs to update JSON files (see [Scripts](#scripts))
+
+5. (Optional) Add nginx proxy with basic auth
 
 ## JSON Data Sources
 
