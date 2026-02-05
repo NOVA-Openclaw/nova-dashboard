@@ -171,6 +171,12 @@
       </div>
       
       <div class="card">
+        <h3>Daily Avg</h3>
+        <div class="value">$<span id="api-daily-avg">—</span></div>
+        <div class="sub"><span id="api-days-elapsed">—</span> days</div>
+      </div>
+      
+      <div class="card">
         <h3>Projected</h3>
         <div class="value" id="api-projected-container">$<span id="api-projected">—</span></div>
         <div class="sub" id="api-alert"></div>
@@ -328,6 +334,10 @@
         const yd = data.yesterday || {};
         document.getElementById('api-yesterday').textContent = yd.costDollars?.toFixed(2) ?? '—';
         document.getElementById('api-yesterday-date').textContent = yd.date ? new Date(yd.date + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : '—';
+        
+        // Daily average
+        document.getElementById('api-daily-avg').textContent = cm.avgDailySpend?.toFixed(2) ?? '—';
+        document.getElementById('api-days-elapsed').textContent = cm.daysElapsed ?? '—';
         document.getElementById('api-projected').textContent = cm.projectedMonthly?.toLocaleString() ?? '—';
         
         // Alert styling if over budget
