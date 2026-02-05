@@ -187,6 +187,18 @@
         <div class="value">$<span id="api-cost-total">—</span></div>
         <div class="sub">since <span id="api-since">Jan 30</span></div>
       </div>
+      
+      <div class="card">
+        <h3>Cost/Hr (Active)</h3>
+        <div class="value">$<span id="api-cph-working">—</span></div>
+        <div class="sub"><span id="api-active-hours">—</span>h active</div>
+      </div>
+      
+      <div class="card">
+        <h3>Cache Hit Rate</h3>
+        <div class="value"><span id="api-cache-rate">—</span>%</div>
+        <div class="sub">all-time</div>
+      </div>
     </div>
 
     <!-- System Stats -->
@@ -355,6 +367,14 @@
         // All-time stats
         document.getElementById('api-cost-total').textContent = data.allTime?.totalSpend?.toFixed(2) ?? '—';
         document.getElementById('api-since').textContent = data.allTime?.since ?? 'Jan 30';
+        
+        // Cost per hour
+        const cph = data.costPerHour || {};
+        document.getElementById('api-cph-working').textContent = cph.working?.toFixed(2) ?? '—';
+        document.getElementById('api-active-hours').textContent = cph.activeHoursMonth?.toFixed(1) ?? '—';
+        
+        // Cache hit rate
+        document.getElementById('api-cache-rate').textContent = data.allTime?.cacheHitRate?.toFixed(1) ?? '—';
         
         if (data.updated) {
           const d = new Date(data.updated);
