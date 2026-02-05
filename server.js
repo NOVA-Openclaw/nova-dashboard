@@ -13,6 +13,11 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// Serve JSON data files from the data directory
+app.get('/status.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'status.json')));
+app.get('/anthropic.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'anthropic.json')));
+app.get('/system.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'system.json')));
+
 // Serve static files from public directory, fallback to root
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.static(__dirname));
