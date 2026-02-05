@@ -165,9 +165,9 @@
       </div>
       
       <div class="card">
-        <h3>Daily Avg</h3>
-        <div class="value">$<span id="api-daily-avg">—</span></div>
-        <div class="sub"><span id="api-days-elapsed">—</span> days</div>
+        <h3>Yesterday</h3>
+        <div class="value">$<span id="api-yesterday">—</span></div>
+        <div class="sub" id="api-yesterday-date">—</div>
       </div>
       
       <div class="card">
@@ -324,8 +324,10 @@
         document.getElementById('api-month').textContent = cm.month ? new Date(cm.month + '-01').toLocaleString('en-US', {month: 'short', year: 'numeric'}) : 'Month';
         document.getElementById('api-cost-mtd').textContent = cm.spend?.toFixed(2) ?? '—';
         document.getElementById('api-limit').textContent = cm.limit?.toLocaleString() ?? '—';
-        document.getElementById('api-daily-avg').textContent = cm.avgDailySpend?.toFixed(2) ?? '—';
-        document.getElementById('api-days-elapsed').textContent = cm.daysElapsed ?? '—';
+        // Yesterday's stats
+        const yd = data.yesterday || {};
+        document.getElementById('api-yesterday').textContent = yd.costDollars?.toFixed(2) ?? '—';
+        document.getElementById('api-yesterday-date').textContent = yd.date ? new Date(yd.date + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : '—';
         document.getElementById('api-projected').textContent = cm.projectedMonthly?.toLocaleString() ?? '—';
         
         // Alert styling if over budget
