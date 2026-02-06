@@ -474,7 +474,8 @@
         const alertEl = document.getElementById('api-alert');
         if (data.alerts?.projectedOverLimit) {
           projContainer.style.color = '#ff6b6b';
-          alertEl.textContent = '⚠️ Over limit!';
+          const limitStr = cm.limit ? `$${cm.limit.toLocaleString()}` : 'limit';
+          alertEl.textContent = `⚠️ Over ${limitStr}!`;
           alertEl.style.color = '#ff6b6b';
         } else {
           projContainer.style.color = '';

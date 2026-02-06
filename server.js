@@ -20,7 +20,7 @@ app.get('/system.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'system.j
 app.get('/staff.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'staff.json')));
 
 // Serve static files from public directory, fallback to root
-app.use(express.static(path.join(__dirname, 'public')));
+// Removed public/ - serve from root only
 app.use(express.static(__dirname));
 
 // Track connected clients
