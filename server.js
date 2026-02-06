@@ -17,6 +17,7 @@ const wss = new WebSocket.Server({ server });
 app.get('/status.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'status.json')));
 app.get('/anthropic.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'anthropic.json')));
 app.get('/system.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'system.json')));
+app.get('/staff.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'staff.json')));
 
 // Serve static files from public directory, fallback to root
 app.use(express.static(path.join(__dirname, 'public')));
@@ -44,8 +45,12 @@ function sendData(ws) {
     const status = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'status.json'), 'utf8'));
     const system = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'system.json'), 'utf8'));
     const anthropic = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'anthropic.json'), 'utf8'));
+    let staff = {};
+    try {
+      staff = JSON.parse(fs.readFileSync(path.join(DATA_DIR, 'staff.json'), 'utf8'));
+    } catch (e) { /* staff.json may not exist yet */ }
     
-    ws.send(JSON.stringify({ type: 'update', status, system, anthropic }));
+    ws.send(JSON.stringify({ type: 'update', status, system, anthropic, staff }));
   } catch (err) {
     console.error('Error reading data:', err.message);
   }
@@ -64,7 +69,8 @@ function broadcast() {
 const watcher = chokidar.watch([
   path.join(DATA_DIR, 'status.json'),
   path.join(DATA_DIR, 'system.json'),
-  path.join(DATA_DIR, 'anthropic.json')
+  path.join(DATA_DIR, 'anthropic.json'),
+  path.join(DATA_DIR, 'staff.json')
 ], { ignoreInitial: true });
 
 watcher.on('change', (filepath) => {

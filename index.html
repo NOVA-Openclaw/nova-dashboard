@@ -74,6 +74,102 @@
     }
     .card .value.small { font-size: 1.1rem; }
     .card .sub { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
+    
+    /* Staff cards */
+    .staff-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+    .staff-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 1rem;
+      backdrop-filter: blur(10px);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+    .staff-card:hover {
+      border-color: rgba(0, 217, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 217, 255, 0.15);
+    }
+    .staff-card.primary {
+      border-color: rgba(168, 85, 247, 0.4);
+      grid-column: span 2;
+    }
+    .staff-card.primary:hover {
+      border-color: rgba(168, 85, 247, 0.6);
+      box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+    }
+    .staff-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .staff-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #00d9ff, #a855f7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #1a1a2e;
+    }
+    .staff-card.primary .staff-avatar {
+      width: 48px;
+      height: 48px;
+      font-size: 1.1rem;
+    }
+    .staff-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #e0e0e0;
+    }
+    .staff-card.primary .staff-name {
+      font-size: 1.2rem;
+    }
+    .staff-role {
+      font-size: 0.7rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .staff-meta {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.75rem;
+      color: #888;
+    }
+    .staff-meta .model {
+      color: #666;
+      font-family: monospace;
+      font-size: 0.7rem;
+    }
+    .staff-status {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .staff-status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .staff-status .dot.online { background: #10b981; }
+    .staff-status .dot.offline { background: #ef4444; }
+    .staff-status .dot.ephemeral { background: #f59e0b; }
+    @media (max-width: 700px) {
+      .staff-card.primary { grid-column: span 1; }
+    }
     .bar {
       height: 6px;
       background: rgba(255, 255, 255, 0.1);
@@ -152,6 +248,21 @@
         <div class="value"><span id="context-percent">—</span>%</div>
         <div class="sub"><span id="context-used">—</span> / <span id="context-total">—</span> tokens</div>
         <div class="bar"><div class="bar-fill cyan" id="context-bar" style="width: 0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Staff Section -->
+    <div class="section-title"><span>Staff</span><span class="timestamp" id="staff-updated"></span></div>
+    <div class="staff-grid" id="staff-grid">
+      <!-- Populated by JavaScript -->
+      <div class="staff-card primary" style="opacity: 0.5;">
+        <div class="staff-header">
+          <div class="staff-avatar">?</div>
+          <div>
+            <div class="staff-name">Loading...</div>
+            <div class="staff-role">—</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -393,9 +504,88 @@
       }
     }
 
+    async function loadStaff() {
+      try {
+        const res = await fetch('staff.json?' + Date.now());
+        const data = await res.json();
+        
+        const grid = document.getElementById('staff-grid');
+        grid.innerHTML = '';
+        
+        // Render Newhart (graduated instance) first if online
+        if (data.newhart) {
+          const nh = data.newhart;
+          const card = document.createElement('a');
+          card.className = 'staff-card primary';
+          card.href = nh.dashboardUrl || '#';
+          if (!nh.dashboardUrl) card.style.cursor = 'default';
+          card.innerHTML = `
+            <div class="staff-header">
+              <div class="staff-avatar">NH</div>
+              <div>
+                <div class="staff-name">Newhart</div>
+                <div class="staff-role">NHR Agent • Full Instance</div>
+              </div>
+            </div>
+            <div class="staff-meta">
+              <div class="staff-status">
+                <span class="dot ${nh.status === 'online' ? 'online' : 'offline'}"></span>
+                ${nh.status === 'online' ? 'Online' : 'Offline'}
+              </div>
+              <div class="model">:${nh.port}</div>
+            </div>
+          `;
+          grid.appendChild(card);
+        }
+        
+        // Render sub-agents
+        const agents = data.agents || [];
+        agents.forEach(agent => {
+          // Skip nova-main (that's me) and nhr-agent (Newhart shown above)
+          if (agent.name === 'nova-main' || agent.name === 'nhr-agent') return;
+          
+          const card = document.createElement('a');
+          card.className = 'staff-card';
+          card.href = `staff/${agent.name}.html`;
+          card.onclick = (e) => { e.preventDefault(); /* TODO: detail view */ };
+          
+          const initials = (agent.nickname || agent.name).slice(0, 2).toUpperCase();
+          const statusClass = agent.persistent ? 'online' : 'ephemeral';
+          const statusText = agent.persistent ? 'Persistent' : 'On-demand';
+          const modelShort = (agent.model || '').split('/').pop().replace('claude-', '').replace('gemini-', 'gem-');
+          
+          card.innerHTML = `
+            <div class="staff-header">
+              <div class="staff-avatar">${initials}</div>
+              <div>
+                <div class="staff-name">${agent.nickname || agent.name}</div>
+                <div class="staff-role">${agent.role}</div>
+              </div>
+            </div>
+            <div class="staff-meta">
+              <div class="staff-status">
+                <span class="dot ${statusClass}"></span>
+                ${statusText}
+              </div>
+              <div class="model">${modelShort}</div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          document.getElementById('staff-updated').textContent = 'Updated ' + timeAgo(d);
+        }
+      } catch (e) {
+        console.error('Staff load error:', e);
+      }
+    }
+
     loadStatus();
     loadSystem();
     loadAnthropic();
+    loadStaff();
     
     // Auto-refresh every 5 minutes (matches cron update interval)
     setInterval(() => {
@@ -404,6 +594,7 @@
         loadStatus();
         loadSystem();
         loadAnthropic();
+        loadStaff();
         document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '1');
       }, 500);
     }, 300000);
