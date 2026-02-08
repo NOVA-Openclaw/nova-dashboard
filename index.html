@@ -358,6 +358,40 @@
       </div>
     </div>
 
+    <!-- PostgreSQL Stats -->
+    <div class="section-title"><span>PostgreSQL — <span id="pg-db-name">nova_memory</span></span><span class="timestamp" id="postgres-updated"></span></div>
+    <div class="grid">
+      <div class="card">
+        <h3>Database Size</h3>
+        <div class="value small" id="pg-db-size">—</div>
+      </div>
+      
+      <div class="card">
+        <h3>Connections</h3>
+        <div class="value" id="pg-connections">—</div>
+        <div class="sub"><span id="pg-backends">—</span> backends</div>
+      </div>
+      
+      <div class="card">
+        <h3>Cache Hit Ratio</h3>
+        <div class="value"><span id="pg-cache-hit">—</span>%</div>
+        <div class="sub">block cache</div>
+      </div>
+      
+      <div class="card">
+        <h3>Transactions</h3>
+        <div class="value small" id="pg-transactions">—</div>
+        <div class="sub"><span id="pg-rollbacks">—</span> rollbacks</div>
+      </div>
+      
+      <div class="card wide" style="grid-column: span 4;">
+        <h3>Largest Tables</h3>
+        <div id="pg-tables" style="margin-top: 0.5rem; font-size: 0.85rem;">
+          <div style="color: #666;">Loading...</div>
+        </div>
+      </div>
+    </div>
+
     <p id="error">⚠️ Could not load status data</p>
     
     <footer>
@@ -583,10 +617,69 @@
       }
     }
 
+    async function loadPostgres() {
+      try {
+        const res = await fetch('postgres.json?' + Date.now());
+        const data = await res.json();
+        
+        // Database info
+        document.getElementById('pg-db-name').textContent = data.database?.name || 'nova_memory';
+        document.getElementById('pg-db-size').textContent = data.database?.size || '—';
+        document.getElementById('pg-connections').textContent = data.database?.connections ?? '—';
+        
+        // Stats
+        document.getElementById('pg-backends').textContent = data.stats?.backends ?? '—';
+        document.getElementById('pg-cache-hit').textContent = data.stats?.cacheHitRatio?.toFixed(2) ?? '—';
+        
+        const commits = data.stats?.transactions?.commits ?? 0;
+        const rollbacks = data.stats?.transactions?.rollbacks ?? 0;
+        document.getElementById('pg-transactions').textContent = commits.toLocaleString();
+        document.getElementById('pg-rollbacks').textContent = rollbacks.toLocaleString();
+        
+        // Tables
+        const tablesContainer = document.getElementById('pg-tables');
+        if (data.tables && data.tables.length > 0) {
+          // Get max bytes for scaling bars
+          const maxBytes = Math.max(...data.tables.map(t => t.bytes || 0));
+          
+          let html = '<div style="display: flex; flex-direction: column; gap: 0.4rem;">';
+          data.tables.slice(0, 10).forEach(table => {
+            const widthPercent = maxBytes > 0 ? (table.bytes / maxBytes * 100) : 0;
+            const rowsText = table.rows >= 0 ? table.rows.toLocaleString() + ' rows' : 'unknown';
+            html += `
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="flex: 0 0 150px; color: #00d9ff; font-family: monospace; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis;">${table.name}</div>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="background: rgba(255,255,255,0.1); height: 4px; border-radius: 2px; overflow: hidden;">
+                    <div style="background: linear-gradient(90deg, #10b981, #00d9ff); height: 100%; width: ${widthPercent}%; transition: width 0.3s;"></div>
+                  </div>
+                </div>
+                <div style="flex: 0 0 60px; text-align: right; color: #888; font-size: 0.7rem;">${table.size}</div>
+                <div style="flex: 0 0 80px; text-align: right; color: #666; font-size: 0.7rem;">${rowsText}</div>
+              </div>
+            `;
+          });
+          html += '</div>';
+          tablesContainer.innerHTML = html;
+        } else {
+          tablesContainer.innerHTML = '<div style="color: #666;">No tables found</div>';
+        }
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          document.getElementById('postgres-updated').textContent = 'Updated ' + timeAgo(d);
+        }
+      } catch (e) {
+        console.error('PostgreSQL load error:', e);
+        document.getElementById('pg-tables').innerHTML = '<div style="color: #ef4444;">Failed to load</div>';
+      }
+    }
+
     loadStatus();
     loadSystem();
     loadAnthropic();
     loadStaff();
+    loadPostgres();
     
     // Auto-refresh every 5 minutes (matches cron update interval)
     setInterval(() => {
@@ -596,6 +689,7 @@
         loadSystem();
         loadAnthropic();
         loadStaff();
+        loadPostgres();
         document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '1');
       }, 500);
     }, 300000);
