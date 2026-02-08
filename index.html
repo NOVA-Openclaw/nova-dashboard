@@ -400,7 +400,12 @@
   </div>
   
   <script>
+    // ====================
+    // Utility Functions
+    // ====================
+    
     function formatBytes(bytes) {
+      if (bytes == null || isNaN(bytes)) return '—';
       if (bytes >= 1e12) return (bytes / 1e12).toFixed(1) + ' TB';
       if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
       if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
@@ -416,28 +421,67 @@
       if (hrs < 24) return hrs + 'h ago';
       return Math.round(hrs / 24) + 'd ago';
     }
+    
+    function safeNum(value, fallback = '—') {
+      if (value == null || isNaN(value)) return fallback;
+      return value;
+    }
+    
+    function safeText(value, fallback = '—') {
+      return value ?? fallback;
+    }
+    
+    function setText(id, value, fallback = '—') {
+      const el = document.getElementById(id);
+      if (el) el.textContent = safeText(value, fallback);
+    }
+    
+    function setBar(id, percent) {
+      const el = document.getElementById(id);
+      if (el) el.style.width = safeNum(percent, 0) + '%';
+    }
+
+    // ====================
+    // Status Normalizer
+    // ====================
+    
+    // Normalize status strings to consistent values
+    function normalizeStatus(status) {
+      if (!status) return 'offline';
+      const normalized = status.toLowerCase().trim();
+      // Treat both 'online' and 'running' as online
+      if (normalized === 'online' || normalized === 'running') return 'online';
+      if (normalized === 'offline') return 'offline';
+      // For other statuses, return as-is
+      return normalized;
+    }
+
+    // ====================
+    // Data Loaders
+    // ====================
 
     async function loadStatus() {
       try {
         const res = await fetch('status.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        document.getElementById('model').textContent = data.model || '—';
-        document.getElementById('compactions').textContent = data.compactions ?? '—';
-        document.getElementById('session').textContent = data.session || '—';
-        document.getElementById('context-percent').textContent = data.context?.percent ?? '—';
-        document.getElementById('context-used').textContent = (data.context?.used ?? 0).toLocaleString();
-        document.getElementById('context-total').textContent = (data.context?.total ?? 0).toLocaleString();
-        document.getElementById('context-bar').style.width = (data.context?.percent ?? 0) + '%';
+        setText('model', data.model);
+        setText('compactions', data.compactions);
+        setText('session', data.session);
+        setText('context-percent', data.context?.percent);
+        setText('context-used', data.context?.used != null ? data.context.used.toLocaleString() : undefined);
+        setText('context-total', data.context?.total != null ? data.context.total.toLocaleString() : undefined);
+        setBar('context-bar', data.context?.percent);
         
         if (data.lastCompaction) {
           const lc = new Date(data.lastCompaction);
-          document.getElementById('last-compaction').textContent = 'Last: ' + timeAgo(lc);
+          setText('last-compaction', 'Last: ' + timeAgo(lc));
         }
         
         if (data.updated) {
           const d = new Date(data.updated);
-          document.getElementById('agent-updated').textContent = 'Updated ' + timeAgo(d);
+          setText('agent-updated', 'Updated ' + timeAgo(d));
         }
       } catch (e) {
         console.error('Status load error:', e);
@@ -447,35 +491,41 @@
     async function loadSystem() {
       try {
         const res = await fetch('system.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        // Gateway
-        const running = data.gateway === 'running';
-        document.getElementById('gateway-status').textContent = running ? 'Online' : 'Offline';
-        document.getElementById('status-dot').className = 'status-dot ' + (running ? 'green' : 'red');
+        // Gateway status - normalize to 'online'/'offline'
+        const gatewayStatus = normalizeStatus(data.gateway);
+        const isOnline = gatewayStatus === 'online';
+        setText('gateway-status', isOnline ? 'Online' : 'Offline');
+        
+        const statusDot = document.getElementById('status-dot');
+        if (statusDot) {
+          statusDot.className = 'status-dot ' + (isOnline ? 'green' : 'red');
+        }
         
         // System stats
-        document.getElementById('uptime').textContent = data.uptime?.human || '—';
-        document.getElementById('load').textContent = data.load?.load1 || '—';
-        document.getElementById('cpu-cores').textContent = data.cpu?.cores || '—';
+        setText('uptime', data.uptime?.human);
+        setText('load', data.load?.load1);
+        setText('cpu-cores', data.cpu?.cores);
         
-        document.getElementById('mem-percent').textContent = data.memory?.percent ?? '—';
-        document.getElementById('mem-used').textContent = (data.memory?.usedMB ?? 0).toLocaleString();
-        document.getElementById('mem-total').textContent = (data.memory?.totalMB ?? 0).toLocaleString();
-        document.getElementById('mem-bar').style.width = (data.memory?.percent ?? 0) + '%';
+        setText('mem-percent', data.memory?.percent);
+        setText('mem-used', data.memory?.usedMB != null ? data.memory.usedMB.toLocaleString() : undefined);
+        setText('mem-total', data.memory?.totalMB != null ? data.memory.totalMB.toLocaleString() : undefined);
+        setBar('mem-bar', data.memory?.percent);
         
-        document.getElementById('disk-percent').textContent = data.disk?.percent ?? '—';
-        document.getElementById('disk-used').textContent = data.disk?.usedGB ?? '—';
-        document.getElementById('disk-total').textContent = data.disk?.totalGB ?? '—';
-        document.getElementById('disk-bar').style.width = (data.disk?.percent ?? 0) + '%';
+        setText('disk-percent', data.disk?.percent);
+        setText('disk-used', data.disk?.usedGB);
+        setText('disk-total', data.disk?.totalGB);
+        setBar('disk-bar', data.disk?.percent);
         
-        document.getElementById('processes').textContent = data.processes ?? '—';
-        document.getElementById('net-rx').textContent = formatBytes(data.network?.rxBytes ?? 0);
-        document.getElementById('net-tx').textContent = formatBytes(data.network?.txBytes ?? 0);
+        setText('processes', data.processes);
+        setText('net-rx', formatBytes(data.network?.rxBytes));
+        setText('net-tx', formatBytes(data.network?.txBytes));
         
         if (data.updated) {
           const d = new Date(data.updated);
-          document.getElementById('system-updated').textContent = 'Updated ' + timeAgo(d);
+          setText('system-updated', 'Updated ' + timeAgo(d));
         }
       } catch (e) {
         document.getElementById('error').style.display = 'block';
@@ -486,53 +536,65 @@
     async function loadAnthropic() {
       try {
         const res = await fetch('anthropic.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
         // Current month stats
         const cm = data.currentMonth || {};
-        document.getElementById('api-month').textContent = cm.month ? new Date(cm.month + '-01').toLocaleString('en-US', {month: 'short', year: 'numeric'}) : 'Month';
-        document.getElementById('api-cost-mtd').textContent = cm.spend?.toFixed(2) ?? '—';
-        document.getElementById('api-limit').textContent = cm.limit?.toLocaleString() ?? '—';
+        const monthText = cm.month 
+          ? new Date(cm.month + '-01').toLocaleString('en-US', {month: 'short', year: 'numeric'}) 
+          : 'Month';
+        setText('api-month', monthText);
+        
+        setText('api-cost-mtd', cm.spend != null ? cm.spend.toFixed(2) : undefined);
+        setText('api-limit', cm.limit != null ? cm.limit.toLocaleString() : undefined);
+        
         // Yesterday's stats
         const yd = data.yesterday || {};
-        document.getElementById('api-yesterday').textContent = yd.costDollars?.toFixed(2) ?? '—';
-        document.getElementById('api-yesterday-date').textContent = yd.date ? new Date(yd.date + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : '—';
+        setText('api-yesterday', yd.costDollars != null ? yd.costDollars.toFixed(2) : undefined);
         
-        // Daily average
-        document.getElementById('api-daily-avg').textContent = cm.avgDailySpend?.toFixed(2) ?? '—';
-        document.getElementById('api-days-elapsed').textContent = cm.daysElapsed ?? '—';
-        document.getElementById('api-projected').textContent = cm.projectedMonthly?.toLocaleString() ?? '—';
+        if (yd.date) {
+          const dateText = new Date(yd.date + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+          setText('api-yesterday-date', dateText);
+        }
+        
+        // Daily average and projection
+        setText('api-daily-avg', cm.avgDailySpend != null ? cm.avgDailySpend.toFixed(2) : undefined);
+        setText('api-days-elapsed', cm.daysElapsed);
+        setText('api-projected', cm.projectedMonthly != null ? cm.projectedMonthly.toLocaleString() : undefined);
         
         // Alert styling if over budget
         const projContainer = document.getElementById('api-projected-container');
         const alertEl = document.getElementById('api-alert');
-        if (data.alerts?.projectedOverLimit) {
-          projContainer.style.color = '#ff6b6b';
-          const limitStr = cm.limit ? `$${cm.limit.toLocaleString()}` : 'limit';
-          alertEl.textContent = `⚠️ Over ${limitStr}!`;
-          alertEl.style.color = '#ff6b6b';
-        } else {
-          projContainer.style.color = '';
-          alertEl.textContent = '';
+        if (projContainer && alertEl) {
+          if (data.alerts?.projectedOverLimit) {
+            projContainer.style.color = '#ff6b6b';
+            const limitStr = cm.limit ? `$${cm.limit.toLocaleString()}` : 'limit';
+            alertEl.textContent = `⚠️ Over ${limitStr}!`;
+            alertEl.style.color = '#ff6b6b';
+          } else {
+            projContainer.style.color = '';
+            alertEl.textContent = '';
+          }
         }
         
         // All-time stats
-        document.getElementById('api-cost-total').textContent = data.allTime?.totalSpend?.toFixed(2) ?? '—';
-        document.getElementById('api-since').textContent = data.allTime?.since ?? 'Jan 30';
+        setText('api-cost-total', data.allTime?.totalSpend != null ? data.allTime.totalSpend.toFixed(2) : undefined);
+        setText('api-since', data.allTime?.since);
         
         // Cost per hour
         const cph = data.costPerHour || {};
-        document.getElementById('api-cph-working').textContent = cph.working?.toFixed(2) ?? '—';
-        document.getElementById('api-active-hours').textContent = cph.activeHoursMonth?.toFixed(1) ?? '—';
-        document.getElementById('api-cph-clock').textContent = cph.wallClock?.toFixed(2) ?? '—';
-        document.getElementById('api-clock-hours').textContent = cph.wallClockHoursMonth ?? '—';
+        setText('api-cph-working', cph.working != null ? cph.working.toFixed(2) : undefined);
+        setText('api-active-hours', cph.activeHoursMonth != null ? cph.activeHoursMonth.toFixed(1) : undefined);
+        setText('api-cph-clock', cph.wallClock != null ? cph.wallClock.toFixed(2) : undefined);
+        setText('api-clock-hours', cph.wallClockHoursMonth);
         
         // Cache hit rate
-        document.getElementById('api-cache-rate').textContent = data.allTime?.cacheHitRate?.toFixed(1) ?? '—';
+        setText('api-cache-rate', data.allTime?.cacheHitRate != null ? data.allTime.cacheHitRate.toFixed(1) : undefined);
         
         if (data.updated) {
           const d = new Date(data.updated);
-          document.getElementById('anthropic-updated').textContent = 'Updated ' + timeAgo(d);
+          setText('anthropic-updated', 'Updated ' + timeAgo(d));
         }
       } catch (e) {
         console.error('Anthropic load error:', e);
@@ -542,18 +604,24 @@
     async function loadStaff() {
       try {
         const res = await fetch('staff.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
         const grid = document.getElementById('staff-grid');
+        if (!grid) return;
         grid.innerHTML = '';
         
-        // Render Newhart (graduated instance) first if online
+        // Render Newhart (graduated instance) first if present
         if (data.newhart) {
           const nh = data.newhart;
+          const nhStatus = normalizeStatus(nh.status);
+          const isOnline = nhStatus === 'online';
+          
           const card = document.createElement('a');
           card.className = 'staff-card primary';
           card.href = nh.dashboardUrl || '#';
           if (!nh.dashboardUrl) card.style.cursor = 'default';
+          
           card.innerHTML = `
             <div class="staff-header">
               <div class="staff-avatar">NH</div>
@@ -564,10 +632,10 @@
             </div>
             <div class="staff-meta">
               <div class="staff-status">
-                <span class="dot ${nh.status === 'online' ? 'online' : 'offline'}"></span>
-                ${nh.status === 'online' ? 'Online' : 'Offline'}
+                <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
+                ${isOnline ? 'Online' : 'Offline'}
               </div>
-              <div class="model">:${nh.port}</div>
+              <div class="model">:${nh.port || '—'}</div>
             </div>
           `;
           grid.appendChild(card);
@@ -587,14 +655,18 @@
           const initials = (agent.nickname || agent.name).slice(0, 2).toUpperCase();
           const statusClass = agent.persistent ? 'online' : 'ephemeral';
           const statusText = agent.persistent ? 'Persistent' : 'On-demand';
-          const modelShort = (agent.model || '').split('/').pop().replace('claude-', '').replace('gemini-', 'gem-');
+          const modelShort = (agent.model || '').split('/').pop()
+            .replace('claude-', '')
+            .replace('gemini-', 'gem-')
+            .replace('openai/', '')
+            || 'default';
           
           card.innerHTML = `
             <div class="staff-header">
               <div class="staff-avatar">${initials}</div>
               <div>
                 <div class="staff-name">${agent.nickname || agent.name}</div>
-                <div class="staff-role">${agent.role}</div>
+                <div class="staff-role">${agent.role || 'Agent'}</div>
               </div>
             </div>
             <div class="staff-meta">
@@ -610,7 +682,7 @@
         
         if (data.updated) {
           const d = new Date(data.updated);
-          document.getElementById('staff-updated').textContent = 'Updated ' + timeAgo(d);
+          setText('staff-updated', 'Updated ' + timeAgo(d));
         }
       } catch (e) {
         console.error('Staff load error:', e);
@@ -620,24 +692,27 @@
     async function loadPostgres() {
       try {
         const res = await fetch('postgres.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
         // Database info
-        document.getElementById('pg-db-name').textContent = data.database?.name || 'nova_memory';
-        document.getElementById('pg-db-size').textContent = data.database?.size || '—';
-        document.getElementById('pg-connections').textContent = data.database?.connections ?? '—';
+        setText('pg-db-name', data.database?.name || 'nova_memory');
+        setText('pg-db-size', data.database?.size);
+        setText('pg-connections', data.database?.connections);
         
         // Stats
-        document.getElementById('pg-backends').textContent = data.stats?.backends ?? '—';
-        document.getElementById('pg-cache-hit').textContent = data.stats?.cacheHitRatio?.toFixed(2) ?? '—';
+        setText('pg-backends', data.stats?.backends);
+        setText('pg-cache-hit', data.stats?.cacheHitRatio != null ? data.stats.cacheHitRatio.toFixed(2) : undefined);
         
         const commits = data.stats?.transactions?.commits ?? 0;
         const rollbacks = data.stats?.transactions?.rollbacks ?? 0;
-        document.getElementById('pg-transactions').textContent = commits.toLocaleString();
-        document.getElementById('pg-rollbacks').textContent = rollbacks.toLocaleString();
+        setText('pg-transactions', commits ? commits.toLocaleString() : '0');
+        setText('pg-rollbacks', rollbacks ? rollbacks.toLocaleString() : '0');
         
         // Tables
         const tablesContainer = document.getElementById('pg-tables');
+        if (!tablesContainer) return;
+        
         if (data.tables && data.tables.length > 0) {
           // Get max bytes for scaling bars
           const maxBytes = Math.max(...data.tables.map(t => t.bytes || 0));
@@ -667,23 +742,24 @@
         
         if (data.updated) {
           const d = new Date(data.updated);
-          document.getElementById('postgres-updated').textContent = 'Updated ' + timeAgo(d);
+          setText('postgres-updated', 'Updated ' + timeAgo(d));
         }
       } catch (e) {
         console.error('PostgreSQL load error:', e);
-        document.getElementById('pg-tables').innerHTML = '<div style="color: #ef4444;">Failed to load</div>';
+        const container = document.getElementById('pg-tables');
+        if (container) container.innerHTML = '<div style="color: #ef4444;">Failed to load</div>';
       }
     }
 
-    loadStatus();
-    loadSystem();
-    loadAnthropic();
-    loadStaff();
-    loadPostgres();
+    // ====================
+    // Auto-Refresh
+    // ====================
     
-    // Auto-refresh every 5 minutes (matches cron update interval)
-    setInterval(() => {
+    function refreshAll() {
+      // Fade timestamps to indicate refresh
       document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '0.5');
+      
+      // Wait a moment, then reload
       setTimeout(() => {
         loadStatus();
         loadSystem();
@@ -692,7 +768,21 @@
         loadPostgres();
         document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '1');
       }, 500);
-    }, 300000);
+    }
+
+    // ====================
+    // Initialization
+    // ====================
+    
+    // Initial load
+    loadStatus();
+    loadSystem();
+    loadAnthropic();
+    loadStaff();
+    loadPostgres();
+    
+    // Auto-refresh every 5 minutes (matches cron update interval)
+    setInterval(refreshAll, 300000);
   </script>
 </body>
 </html>

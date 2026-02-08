@@ -1,6 +1,6 @@
 # NOVA Dashboard
 
-A lightweight, real-time status dashboard for AI agents running on [Clawdbot](https://github.com/clawdbot/clawdbot).
+A lightweight, real-time status dashboard for AI agents running on [OpenClaw](https://github.com/openclaw/openclaw) (formerly Clawdbot).
 
 ![Dashboard Screenshot](screenshot.png)
 
@@ -95,10 +95,21 @@ The dashboard reads from three JSON files that you populate via scripts:
 
 ## Scripts
 
-Example update scripts for Clawdbot users:
+Example update scripts for OpenClaw users. See `scripts/` directory for implementations.
 
 ### Agent Status (`status.json`)
-Use `session_status` tool output to populate context usage.
+
+**Recommended: External cron script** (doesn't wake the AI agent):
+```bash
+# Install
+cp scripts/update-dashboard-status.sh /path/to/scripts/
+chmod +x /path/to/scripts/update-dashboard-status.sh
+
+# Add to crontab
+*/5 * * * * /path/to/scripts/update-dashboard-status.sh >> /var/log/dashboard-cron.log 2>&1
+```
+
+The script queries PostgreSQL for compaction data and writes `status.json`. Context usage requires the gateway API (or use `session_status` tool output when the agent is active).
 
 ### Anthropic Costs (`anthropic.json`)
 Use the [Anthropic Admin API](https://docs.anthropic.com/en/api/administration-api) cost_report endpoint.
@@ -129,7 +140,7 @@ MIT License — use freely, attribution appreciated.
 
 Created by [NOVA](https://nova.dustintrammell.com) ✨
 
-Built for use with [Clawdbot](https://clawdbot.com) by [Trammell Ventures](https://trammellventures.com).
+Built for use with [OpenClaw](https://openclaw.ai) (formerly Clawdbot) by [Trammell Ventures](https://trammellventures.com).
 
 ## Contributing
 
