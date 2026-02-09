@@ -74,6 +74,14 @@
     }
     .card .value.small { font-size: 1.1rem; }
     .card .sub { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
+    .card[onclick] {
+      transition: all 0.2s ease;
+    }
+    .card[onclick]:hover {
+      border-color: rgba(0, 217, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 217, 255, 0.15);
+    }
     
     /* Staff cards */
     .staff-grid {
@@ -389,6 +397,22 @@
         <div id="pg-tables" style="margin-top: 0.5rem; font-size: 0.85rem;">
           <div style="color: #666;">Loading...</div>
         </div>
+      </div>
+    </div>
+
+    <!-- Reports Section -->
+    <div class="section-title"><span>Reports</span><span class="timestamp" id="reports-updated"></span></div>
+    <div class="grid">
+      <div class="card wide" id="it-report-card" style="cursor: pointer;" onclick="openReport('itReport')">
+        <h3>📊 IT/Development Report</h3>
+        <div class="value small" id="it-report-date">—</div>
+        <div class="sub">Daily development activity summary</div>
+      </div>
+      
+      <div class="card wide" id="digest-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('dailyDigest')">
+        <h3>📝 Daily Activity Digest</h3>
+        <div class="value small" id="digest-date">—</div>
+        <div class="sub">Tasks, tokens, and highlights</div>
       </div>
     </div>
 
@@ -752,6 +776,54 @@
     }
 
     // ====================
+    // Reports
+    // ====================
+    
+    let reportsData = null;
+    
+    async function loadReports() {
+      try {
+        const res = await fetch('reports.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        reportsData = await res.json();
+        
+        const itReport = reportsData.reports?.itReport;
+        const digest = reportsData.reports?.dailyDigest;
+        
+        // IT Report
+        if (itReport?.available && itReport.date) {
+          setText('it-report-date', itReport.date);
+          document.getElementById('it-report-card').style.opacity = '1';
+        } else {
+          setText('it-report-date', 'Not available');
+          document.getElementById('it-report-card').style.opacity = '0.5';
+        }
+        
+        // Daily Digest
+        if (digest?.available && digest.date) {
+          setText('digest-date', digest.date);
+          document.getElementById('digest-card').style.opacity = '1';
+        } else {
+          setText('digest-date', 'Not available');
+          document.getElementById('digest-card').style.opacity = '0.5';
+        }
+        
+        if (reportsData.updated) {
+          const d = new Date(reportsData.updated);
+          setText('reports-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        console.error('Reports load error:', e);
+      }
+    }
+    
+    function openReport(type) {
+      if (!reportsData?.reports?.[type]?.available) return;
+      const url = reportsData.reports[type].url;
+      if (url) window.open(url, '_blank');
+    }
+
+    // ====================
     // Auto-Refresh
     // ====================
     
@@ -766,6 +838,7 @@
         loadAnthropic();
         loadStaff();
         loadPostgres();
+        loadReports();
         document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '1');
       }, 500);
     }
@@ -780,6 +853,7 @@
     loadAnthropic();
     loadStaff();
     loadPostgres();
+    loadReports();
     
     // Auto-refresh every 5 minutes (matches cron update interval)
     setInterval(refreshAll, 300000);
