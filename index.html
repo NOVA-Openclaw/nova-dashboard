@@ -414,6 +414,12 @@
         <div class="value small" id="digest-date">—</div>
         <div class="sub">Tasks, tokens, and highlights</div>
       </div>
+      
+      <div class="card wide" id="comms-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('commsDigest')">
+        <h3>📬 Communications Digest</h3>
+        <div class="value small" id="comms-date">—</div>
+        <div class="sub">Email & social activity summary</div>
+      </div>
     </div>
 
     <p id="error">⚠️ Could not load status data</p>
@@ -806,6 +812,16 @@
         } else {
           setText('digest-date', 'Not available');
           document.getElementById('digest-card').style.opacity = '0.5';
+        }
+        
+        // Communications Digest
+        const comms = reportsData.reports?.commsDigest;
+        if (comms?.available && comms.date) {
+          setText('comms-date', comms.date);
+          document.getElementById('comms-card').style.opacity = '1';
+        } else {
+          setText('comms-date', 'Not available');
+          document.getElementById('comms-card').style.opacity = '0.5';
         }
         
         if (reportsData.updated) {
