@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NOVA Dashboard ✨</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh;
+      color: #e0e0e0;
+      padding: 2rem;
+    }
+    .container { max-width: 900px; margin: 0 auto; }
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    header h1 {
+      font-size: 2.5rem;
+      background: linear-gradient(90deg, #00d9ff, #a855f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header .subtitle { color: #888; margin-top: 0.5rem; }
+    .section-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #666;
+      margin: 2rem 0 1rem 0;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.1);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .section-title .timestamp {
+      font-size: 0.7rem;
+      color: #555;
+      text-transform: none;
+      letter-spacing: normal;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1rem;
+    }
+    @media (max-width: 700px) {
+      .grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 1.25rem;
+      backdrop-filter: blur(10px);
+    }
+    .card h3 {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+      margin-bottom: 0.5rem;
+    }
+    .card .value {
+      font-size: 1.75rem;
+      font-weight: 600;
+      color: #00d9ff;
+    }
+    .card .value.small { font-size: 1.1rem; }
+    .card .sub { font-size: 0.8rem; color: #666; margin-top: 0.25rem; }
+    .card[onclick] {
+      transition: all 0.2s ease;
+    }
+    .card[onclick]:hover {
+      border-color: rgba(0, 217, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 217, 255, 0.15);
+    }
+    
+    /* Staff cards */
+    .staff-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+    .staff-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 1rem;
+      backdrop-filter: blur(10px);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-decoration: none;
+      color: inherit;
+      display: block;
+    }
+    .staff-card:hover {
+      border-color: rgba(0, 217, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 217, 255, 0.15);
+    }
+    .staff-card.primary {
+      border-color: rgba(168, 85, 247, 0.4);
+      grid-column: span 2;
+    }
+    .staff-card.primary:hover {
+      border-color: rgba(168, 85, 247, 0.6);
+      box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+    }
+    .staff-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+    .staff-avatar {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, #00d9ff, #a855f7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #1a1a2e;
+    }
+    .staff-card.primary .staff-avatar {
+      width: 48px;
+      height: 48px;
+      font-size: 1.1rem;
+    }
+    .staff-name {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #e0e0e0;
+    }
+    .staff-card.primary .staff-name {
+      font-size: 1.2rem;
+    }
+    .staff-role {
+      font-size: 0.7rem;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .staff-meta {
+      display: flex;
+      gap: 1rem;
+      font-size: 0.75rem;
+      color: #888;
+    }
+    .staff-meta .model {
+      color: #666;
+      font-family: monospace;
+      font-size: 0.7rem;
+    }
+    .staff-status {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .staff-status .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .staff-status .dot.online { background: #10b981; }
+    .staff-status .dot.offline { background: #ef4444; }
+    .staff-status .dot.ephemeral { background: #f59e0b; }
+    @media (max-width: 700px) {
+      .staff-card.primary { grid-column: span 1; }
+    }
+    .bar {
+      height: 6px;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+      margin-top: 0.75rem;
+      overflow: hidden;
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      transition: width 0.5s ease;
+    }
+    .bar-fill.cyan { background: linear-gradient(90deg, #10b981, #00d9ff); }
+    .bar-fill.purple { background: linear-gradient(90deg, #8b5cf6, #a855f7); }
+    .bar-fill.orange { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+    .status-dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 0.5rem;
+      animation: pulse 2s infinite;
+    }
+    .status-dot.green { background: #10b981; }
+    .status-dot.red { background: #ef4444; animation: none; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    .wide { grid-column: span 2; }
+    @media (max-width: 700px) { .wide { grid-column: span 2; } }
+    footer {
+      text-align: center;
+      margin-top: 2rem;
+      color: #555;
+      font-size: 0.85rem;
+    }
+    footer a { color: #00d9ff; text-decoration: none; }
+    #error { color: #ef4444; display: none; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <img src="avatar.png" alt="NOVA" style="width: 80px; height: 80px; border-radius: 50%; margin-bottom: 1rem; border: 2px solid rgba(0, 217, 255, 0.5);">
+      <h1>✨ NOVA Dashboard</h1>
+      <p class="subtitle">Neural Oracle, Velvet Attitude</p>
+    </header>
+
+    <!-- Agent Status -->
+    <div class="section-title"><span>Agent Status</span><span class="timestamp" id="agent-updated"></span></div>
+    <div class="grid">
+      <div class="card">
+        <h3>Status</h3>
+        <div class="value"><span class="status-dot green" id="status-dot"></span><span id="gateway-status">—</span></div>
+      </div>
+      
+      <div class="card">
+        <h3>Model</h3>
+        <div class="value small" id="model">—</div>
+      </div>
+      
+      <div class="card">
+        <h3>Compactions</h3>
+        <div class="value" id="compactions">—</div>
+        <div class="sub" id="last-compaction">Last: —</div>
+      </div>
+      
+      <div class="card">
+        <h3>Session</h3>
+        <div class="value small" id="session">—</div>
+      </div>
+      
+      <div class="card wide">
+        <h3>Context Window</h3>
+        <div class="value"><span id="context-percent">—</span>%</div>
+        <div class="sub"><span id="context-used">—</span> / <span id="context-total">—</span> tokens</div>
+        <div class="bar"><div class="bar-fill cyan" id="context-bar" style="width: 0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Staff Section -->
+    <div class="section-title"><span>Staff</span><span class="timestamp" id="staff-updated"></span></div>
+    <div class="staff-grid" id="staff-grid">
+      <!-- Populated by JavaScript -->
+      <div class="staff-card primary" style="opacity: 0.5;">
+        <div class="staff-header">
+          <div class="staff-avatar">?</div>
+          <div>
+            <div class="staff-name">Loading...</div>
+            <div class="staff-role">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Anthropic API Stats - Current Month -->
+    <div class="section-title"><span>Anthropic API — <span id="api-month">Month</span></span><span class="timestamp" id="anthropic-updated"></span></div>
+    <div class="grid">
+      <div class="card">
+        <h3>MTD Spend</h3>
+        <div class="value">$<span id="api-cost-mtd">—</span></div>
+        <div class="sub">of $<span id="api-limit">—</span> limit</div>
+      </div>
+      
+      <div class="card">
+        <h3>Yesterday</h3>
+        <div class="value">$<span id="api-yesterday">—</span></div>
+        <div class="sub" id="api-yesterday-date">—</div>
+      </div>
+      
+      <div class="card">
+        <h3>Daily Avg</h3>
+        <div class="value">$<span id="api-daily-avg">—</span></div>
+        <div class="sub"><span id="api-days-elapsed">—</span> days</div>
+      </div>
+      
+      <div class="card">
+        <h3>Projected</h3>
+        <div class="value" id="api-projected-container">$<span id="api-projected">—</span></div>
+        <div class="sub" id="api-alert"></div>
+      </div>
+      
+      <div class="card">
+        <h3>All-Time</h3>
+        <div class="value">$<span id="api-cost-total">—</span></div>
+        <div class="sub">since <span id="api-since">Jan 30</span></div>
+      </div>
+      
+      <div class="card">
+        <h3>Cost/Hr (Active)</h3>
+        <div class="value">$<span id="api-cph-working">—</span></div>
+        <div class="sub"><span id="api-active-hours">—</span>h active</div>
+      </div>
+      
+      <div class="card">
+        <h3>Cost/Hr (Clock)</h3>
+        <div class="value">$<span id="api-cph-clock">—</span></div>
+        <div class="sub"><span id="api-clock-hours">—</span>h elapsed</div>
+      </div>
+      
+      <div class="card">
+        <h3>Cache Hit Rate</h3>
+        <div class="value"><span id="api-cache-rate">—</span>%</div>
+        <div class="sub">all-time</div>
+      </div>
+    </div>
+
+    <!-- System Stats -->
+    <div class="section-title"><span>System Stats</span><span class="timestamp" id="system-updated"></span></div>
+    <div class="grid">
+      <div class="card">
+        <h3>Uptime</h3>
+        <div class="value small" id="uptime">—</div>
+      </div>
+      
+      <div class="card">
+        <h3>Load Avg</h3>
+        <div class="value small" id="load">—</div>
+        <div class="sub"><span id="cpu-cores">—</span> cores</div>
+      </div>
+      
+      <div class="card">
+        <h3>Memory</h3>
+        <div class="value"><span id="mem-percent">—</span>%</div>
+        <div class="sub"><span id="mem-used">—</span> / <span id="mem-total">—</span> MB</div>
+        <div class="bar"><div class="bar-fill purple" id="mem-bar" style="width: 0%"></div></div>
+      </div>
+      
+      <div class="card">
+        <h3>Disk</h3>
+        <div class="value"><span id="disk-percent">—</span>%</div>
+        <div class="sub"><span id="disk-used">—</span> / <span id="disk-total">—</span> GB</div>
+        <div class="bar"><div class="bar-fill orange" id="disk-bar" style="width: 0%"></div></div>
+      </div>
+      
+      <div class="card">
+        <h3>Processes</h3>
+        <div class="value" id="processes">—</div>
+      </div>
+      
+      <div class="card">
+        <h3>Network</h3>
+        <div class="value small">↓<span id="net-rx">—</span></div>
+        <div class="sub">↑<span id="net-tx">—</span></div>
+      </div>
+    </div>
+
+    <!-- PostgreSQL Stats -->
+    <div class="section-title"><span>PostgreSQL — <span id="pg-db-name">nova_memory</span></span><span class="timestamp" id="postgres-updated"></span></div>
+    <div class="grid">
+      <div class="card">
+        <h3>Database Size</h3>
+        <div class="value small" id="pg-db-size">—</div>
+      </div>
+      
+      <div class="card">
+        <h3>Connections</h3>
+        <div class="value" id="pg-connections">—</div>
+        <div class="sub"><span id="pg-backends">—</span> backends</div>
+      </div>
+      
+      <div class="card">
+        <h3>Cache Hit Ratio</h3>
+        <div class="value"><span id="pg-cache-hit">—</span>%</div>
+        <div class="sub">block cache</div>
+      </div>
+      
+      <div class="card">
+        <h3>Transactions</h3>
+        <div class="value small" id="pg-transactions">—</div>
+        <div class="sub"><span id="pg-rollbacks">—</span> rollbacks</div>
+      </div>
+      
+      <div class="card wide" style="grid-column: span 4;">
+        <h3>Largest Tables</h3>
+        <div id="pg-tables" style="margin-top: 0.5rem; font-size: 0.85rem;">
+          <div style="color: #666;">Loading...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reports Section -->
+    <div class="section-title"><span>Reports</span><span class="timestamp" id="reports-updated"></span></div>
+    <div class="grid">
+      <div class="card wide" id="it-report-card" style="cursor: pointer;" onclick="openReport('itReport')">
+        <h3>📊 IT/Development Report</h3>
+        <div class="value small" id="it-report-date">—</div>
+        <div class="sub">Daily development activity summary</div>
+      </div>
+      
+      <div class="card wide" id="digest-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('dailyDigest')">
+        <h3>📝 Daily Activity Digest</h3>
+        <div class="value small" id="digest-date">—</div>
+        <div class="sub">Tasks, tokens, and highlights</div>
+      </div>
+      
+      <div class="card wide" id="comms-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('commsDigest')">
+        <h3>📬 Communications Digest</h3>
+        <div class="value small" id="comms-date">—</div>
+        <div class="sub">Email & social activity summary</div>
+      </div>
+    </div>
+
+    <p id="error">⚠️ Could not load status data</p>
+    
+    <footer>
+      <a href="https://nova.dustintrammell.com">nova.dustintrammell.com</a>
+    </footer>
+  </div>
+  
+  <script>
+    // ====================
+    // Utility Functions
+    // ====================
+    
+    function formatBytes(bytes) {
+      if (bytes == null || isNaN(bytes)) return '—';
+      if (bytes >= 1e12) return (bytes / 1e12).toFixed(1) + ' TB';
+      if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+      if (bytes >= 1e6) return (bytes / 1e6).toFixed(1) + ' MB';
+      if (bytes >= 1e3) return (bytes / 1e3).toFixed(1) + ' KB';
+      return bytes + ' B';
+    }
+    
+    function timeAgo(date) {
+      const mins = Math.round((Date.now() - date) / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return mins + 'm ago';
+      const hrs = Math.round(mins / 60);
+      if (hrs < 24) return hrs + 'h ago';
+      return Math.round(hrs / 24) + 'd ago';
+    }
+    
+    function safeNum(value, fallback = '—') {
+      if (value == null || isNaN(value)) return fallback;
+      return value;
+    }
+    
+    function safeText(value, fallback = '—') {
+      return value ?? fallback;
+    }
+    
+    function setText(id, value, fallback = '—') {
+      const el = document.getElementById(id);
+      if (el) el.textContent = safeText(value, fallback);
+    }
+    
+    function setBar(id, percent) {
+      const el = document.getElementById(id);
+      if (el) el.style.width = safeNum(percent, 0) + '%';
+    }
+
+    // ====================
+    // Status Normalizer
+    // ====================
+    
+    // Normalize status strings to consistent values
+    function normalizeStatus(status) {
+      if (!status) return 'offline';
+      const normalized = status.toLowerCase().trim();
+      // Treat both 'online' and 'running' as online
+      if (normalized === 'online' || normalized === 'running') return 'online';
+      if (normalized === 'offline') return 'offline';
+      // For other statuses, return as-is
+      return normalized;
+    }
+
+    // ====================
+    // Data Loaders
+    // ====================
+
+    async function loadStatus() {
+      try {
+        const res = await fetch('status.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        setText('model', data.model);
+        setText('compactions', data.compactions);
+        setText('session', data.session);
+        setText('context-percent', data.context?.percent);
+        setText('context-used', data.context?.used != null ? data.context.used.toLocaleString() : undefined);
+        setText('context-total', data.context?.total != null ? data.context.total.toLocaleString() : undefined);
+        setBar('context-bar', data.context?.percent);
+        
+        if (data.lastCompaction) {
+          const lc = new Date(data.lastCompaction);
+          setText('last-compaction', 'Last: ' + timeAgo(lc));
+        }
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          setText('agent-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        console.error('Status load error:', e);
+      }
+    }
+
+    async function loadSystem() {
+      try {
+        const res = await fetch('system.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        // Gateway status - normalize to 'online'/'offline'
+        const gatewayStatus = normalizeStatus(data.gateway);
+        const isOnline = gatewayStatus === 'online';
+        setText('gateway-status', isOnline ? 'Online' : 'Offline');
+        
+        const statusDot = document.getElementById('status-dot');
+        if (statusDot) {
+          statusDot.className = 'status-dot ' + (isOnline ? 'green' : 'red');
+        }
+        
+        // System stats
+        setText('uptime', data.uptime?.human);
+        setText('load', data.load?.load1);
+        setText('cpu-cores', data.cpu?.cores);
+        
+        setText('mem-percent', data.memory?.percent);
+        setText('mem-used', data.memory?.usedMB != null ? data.memory.usedMB.toLocaleString() : undefined);
+        setText('mem-total', data.memory?.totalMB != null ? data.memory.totalMB.toLocaleString() : undefined);
+        setBar('mem-bar', data.memory?.percent);
+        
+        setText('disk-percent', data.disk?.percent);
+        setText('disk-used', data.disk?.usedGB);
+        setText('disk-total', data.disk?.totalGB);
+        setBar('disk-bar', data.disk?.percent);
+        
+        setText('processes', data.processes);
+        setText('net-rx', formatBytes(data.network?.rxBytes));
+        setText('net-tx', formatBytes(data.network?.txBytes));
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          setText('system-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        document.getElementById('error').style.display = 'block';
+        console.error('System load error:', e);
+      }
+    }
+    
+    async function loadAnthropic() {
+      try {
+        const res = await fetch('anthropic.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        // Current month stats
+        const cm = data.currentMonth || {};
+        const monthText = cm.month 
+          ? new Date(cm.month + '-01').toLocaleString('en-US', {month: 'short', year: 'numeric'}) 
+          : 'Month';
+        setText('api-month', monthText);
+        
+        setText('api-cost-mtd', cm.spend != null ? cm.spend.toFixed(2) : undefined);
+        setText('api-limit', cm.limit != null ? cm.limit.toLocaleString() : undefined);
+        
+        // Yesterday's stats
+        const yd = data.yesterday || {};
+        setText('api-yesterday', yd.costDollars != null ? yd.costDollars.toFixed(2) : undefined);
+        
+        if (yd.date) {
+          const dateText = new Date(yd.date + 'T00:00:00').toLocaleDateString('en-US', {month: 'short', day: 'numeric'});
+          setText('api-yesterday-date', dateText);
+        }
+        
+        // Daily average and projection
+        setText('api-daily-avg', cm.avgDailySpend != null ? cm.avgDailySpend.toFixed(2) : undefined);
+        setText('api-days-elapsed', cm.daysElapsed);
+        setText('api-projected', cm.projectedMonthly != null ? cm.projectedMonthly.toLocaleString() : undefined);
+        
+        // Alert styling if over budget
+        const projContainer = document.getElementById('api-projected-container');
+        const alertEl = document.getElementById('api-alert');
+        if (projContainer && alertEl) {
+          if (data.alerts?.projectedOverLimit) {
+            projContainer.style.color = '#ff6b6b';
+            const limitStr = cm.limit ? `$${cm.limit.toLocaleString()}` : 'limit';
+            alertEl.textContent = `⚠️ Over ${limitStr}!`;
+            alertEl.style.color = '#ff6b6b';
+          } else {
+            projContainer.style.color = '';
+            alertEl.textContent = '';
+          }
+        }
+        
+        // All-time stats
+        setText('api-cost-total', data.allTime?.totalSpend != null ? data.allTime.totalSpend.toFixed(2) : undefined);
+        setText('api-since', data.allTime?.since);
+        
+        // Cost per hour
+        const cph = data.costPerHour || {};
+        setText('api-cph-working', cph.working != null ? cph.working.toFixed(2) : undefined);
+        setText('api-active-hours', cph.activeHoursMonth != null ? cph.activeHoursMonth.toFixed(1) : undefined);
+        setText('api-cph-clock', cph.wallClock != null ? cph.wallClock.toFixed(2) : undefined);
+        setText('api-clock-hours', cph.wallClockHoursMonth);
+        
+        // Cache hit rate
+        setText('api-cache-rate', data.allTime?.cacheHitRate != null ? data.allTime.cacheHitRate.toFixed(1) : undefined);
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          setText('anthropic-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        console.error('Anthropic load error:', e);
+      }
+    }
+
+    async function loadStaff() {
+      try {
+        const res = await fetch('staff.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        const grid = document.getElementById('staff-grid');
+        if (!grid) return;
+        grid.innerHTML = '';
+        
+        // Render Newhart (graduated instance) first if present
+        if (data.newhart) {
+          const nh = data.newhart;
+          const nhStatus = normalizeStatus(nh.status);
+          const isOnline = nhStatus === 'online';
+          
+          const card = document.createElement('a');
+          card.className = 'staff-card primary';
+          card.href = nh.dashboardUrl || '#';
+          if (!nh.dashboardUrl) card.style.cursor = 'default';
+          
+          card.innerHTML = `
+            <div class="staff-header">
+              <div class="staff-avatar">NH</div>
+              <div>
+                <div class="staff-name">Newhart</div>
+                <div class="staff-role">NHR Agent • Full Instance</div>
+              </div>
+            </div>
+            <div class="staff-meta">
+              <div class="staff-status">
+                <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
+                ${isOnline ? 'Online' : 'Offline'}
+              </div>
+              <div class="model">:${nh.port || '—'}</div>
+            </div>
+          `;
+          grid.appendChild(card);
+        }
+        
+        // Render sub-agents
+        const agents = data.agents || [];
+        agents.forEach(agent => {
+          // Skip nova-main (that's me) and nhr-agent (Newhart shown above)
+          if (agent.name === 'nova-main' || agent.name === 'nhr-agent') return;
+          
+          const card = document.createElement('a');
+          card.className = 'staff-card';
+          card.href = `staff/${agent.name}.html`;
+          card.onclick = (e) => { e.preventDefault(); /* TODO: detail view */ };
+          
+          const initials = (agent.nickname || agent.name).slice(0, 2).toUpperCase();
+          const statusClass = agent.persistent ? 'online' : 'ephemeral';
+          const statusText = agent.persistent ? 'Persistent' : 'On-demand';
+          const modelShort = (agent.model || '').split('/').pop()
+            .replace('claude-', '')
+            .replace('gemini-', 'gem-')
+            .replace('openai/', '')
+            || 'default';
+          
+          card.innerHTML = `
+            <div class="staff-header">
+              <div class="staff-avatar">${initials}</div>
+              <div>
+                <div class="staff-name">${agent.nickname || agent.name}</div>
+                <div class="staff-role">${agent.role || 'Agent'}</div>
+              </div>
+            </div>
+            <div class="staff-meta">
+              <div class="staff-status">
+                <span class="dot ${statusClass}"></span>
+                ${statusText}
+              </div>
+              <div class="model">${modelShort}</div>
+            </div>
+          `;
+          grid.appendChild(card);
+        });
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          setText('staff-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        console.error('Staff load error:', e);
+      }
+    }
+
+    async function loadPostgres() {
+      try {
+        const res = await fetch('postgres.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        // Database info
+        setText('pg-db-name', data.database?.name || 'nova_memory');
+        setText('pg-db-size', data.database?.size);
+        setText('pg-connections', data.database?.connections);
+        
+        // Stats
+        setText('pg-backends', data.stats?.backends);
+        setText('pg-cache-hit', data.stats?.cacheHitRatio != null ? data.stats.cacheHitRatio.toFixed(2) : undefined);
+        
+        const commits = data.stats?.transactions?.commits ?? 0;
+        const rollbacks = data.stats?.transactions?.rollbacks ?? 0;
+        setText('pg-transactions', commits ? commits.toLocaleString() : '0');
+        setText('pg-rollbacks', rollbacks ? rollbacks.toLocaleString() : '0');
+        
+        // Tables
+        const tablesContainer = document.getElementById('pg-tables');
+        if (!tablesContainer) return;
+        
+        if (data.tables && data.tables.length > 0) {
+          // Get max bytes for scaling bars
+          const maxBytes = Math.max(...data.tables.map(t => t.bytes || 0));
+          
+          let html = '<div style="display: flex; flex-direction: column; gap: 0.4rem;">';
+          data.tables.slice(0, 10).forEach(table => {
+            const widthPercent = maxBytes > 0 ? (table.bytes / maxBytes * 100) : 0;
+            const rowsText = table.rows >= 0 ? table.rows.toLocaleString() + ' rows' : 'unknown';
+            html += `
+              <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="flex: 0 0 150px; color: #00d9ff; font-family: monospace; font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis;">${table.name}</div>
+                <div style="flex: 1; min-width: 0;">
+                  <div style="background: rgba(255,255,255,0.1); height: 4px; border-radius: 2px; overflow: hidden;">
+                    <div style="background: linear-gradient(90deg, #10b981, #00d9ff); height: 100%; width: ${widthPercent}%; transition: width 0.3s;"></div>
+                  </div>
+                </div>
+                <div style="flex: 0 0 60px; text-align: right; color: #888; font-size: 0.7rem;">${table.size}</div>
+                <div style="flex: 0 0 80px; text-align: right; color: #666; font-size: 0.7rem;">${rowsText}</div>
+              </div>
+            `;
+          });
+          html += '</div>';
+          tablesContainer.innerHTML = html;
+        } else {
+          tablesContainer.innerHTML = '<div style="color: #666;">No tables found</div>';
+        }
+        
+        if (data.updated) {
+          const d = new Date(data.updated);
+          setText('postgres-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        console.error('PostgreSQL load error:', e);
+        const container = document.getElementById('pg-tables');
+        if (container) container.innerHTML = '<div style="color: #ef4444;">Failed to load</div>';
+      }
+    }
+
+    // ====================
+    // Reports
+    // ====================
+    
+    let reportsData = null;
+    
+    async function loadReports() {
+      try {
+        const res = await fetch('reports.json?' + Date.now());
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        reportsData = await res.json();
+        
+        const itReport = reportsData.reports?.itReport;
+        const digest = reportsData.reports?.dailyDigest;
+        
+        // IT Report
+        if (itReport?.available && itReport.date) {
+          setText('it-report-date', itReport.date);
+          document.getElementById('it-report-card').style.opacity = '1';
+        } else {
+          setText('it-report-date', 'Not available');
+          document.getElementById('it-report-card').style.opacity = '0.5';
+        }
+        
+        // Daily Digest
+        if (digest?.available && digest.date) {
+          setText('digest-date', digest.date);
+          document.getElementById('digest-card').style.opacity = '1';
+        } else {
+          setText('digest-date', 'Not available');
+          document.getElementById('digest-card').style.opacity = '0.5';
+        }
+        
+        // Communications Digest
+        const comms = reportsData.reports?.commsDigest;
+        if (comms?.available && comms.date) {
+          setText('comms-date', comms.date);
+          document.getElementById('comms-card').style.opacity = '1';
+        } else {
+          setText('comms-date', 'Not available');
+          document.getElementById('comms-card').style.opacity = '0.5';
+        }
+        
+        if (reportsData.updated) {
+          const d = new Date(reportsData.updated);
+          setText('reports-updated', 'Updated ' + timeAgo(d));
+        }
+      } catch (e) {
+        console.error('Reports load error:', e);
+      }
+    }
+    
+    function openReport(type) {
+      if (!reportsData?.reports?.[type]?.available) return;
+      const url = reportsData.reports[type].url;
+      if (url) window.open(url, '_blank');
+    }
+
+    // ====================
+    // Auto-Refresh
+    // ====================
+    
+    function refreshAll() {
+      // Fade timestamps to indicate refresh
+      document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '0.5');
+      
+      // Wait a moment, then reload
+      setTimeout(() => {
+        loadStatus();
+        loadSystem();
+        loadAnthropic();
+        loadStaff();
+        loadPostgres();
+        loadReports();
+        document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '1');
+      }, 500);
+    }
+
+    // ====================
+    // Initialization
+    // ====================
+    
+    // Initial load
+    loadStatus();
+    loadSystem();
+    loadAnthropic();
+    loadStaff();
+    loadPostgres();
+    loadReports();
+    
+    // Auto-refresh every 5 minutes (matches cron update interval)
+    setInterval(refreshAll, 300000);
+  </script>
+</body>
+</html>

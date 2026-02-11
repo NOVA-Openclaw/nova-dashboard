@@ -11,3 +11,8 @@ system.json
 .DS_Store
 Thumbs.db
 node_modules/
+
+# Dashboard runtime data
+dashboard/*.json
+dashboard/.htpasswd
+dashboard/.htaccess
