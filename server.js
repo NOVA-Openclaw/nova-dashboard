@@ -19,6 +19,8 @@ app.get('/status.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'status.j
 app.get('/anthropic.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'anthropic.json')));
 app.get('/system.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'system.json')));
 app.get('/staff.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'staff.json')));
+app.get('/postgres.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'postgres.json')));
+app.get('/reports.json', (req, res) => res.sendFile(path.join(DATA_DIR, 'reports.json')));
 
 // Get top resource-consuming processes
 app.get('/processes.json', async (req, res) => {
