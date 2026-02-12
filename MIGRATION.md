@@ -40,6 +40,18 @@ psql -d "$DB_NAME"
 
 ---
 
+## Quick Start (Upgrading?)
+
+If you already have nova-dashboard installed with the old `nova_memory` database:
+
+```bash
+./scripts/deploy.sh --migrate
+```
+
+This will guide you through the migration interactively. For detailed manual migration steps, see [Phase 3: Migration](#phase-3-migration) below.
+
+---
+
 ## Affected Systems
 
 This change impacts any system or script that references the database by name:
