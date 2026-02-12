@@ -16,3 +16,6 @@ node_modules/
 dashboard/*.json
 dashboard/.htpasswd
 dashboard/.htaccess
+
+# NOVA local documentation config (untracked)
+.nova/
