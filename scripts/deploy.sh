@@ -8,6 +8,22 @@ DASHBOARD_DIR="$HOME/clawd/nova-dashboard"
 LOG_FILE="$HOME/clawd/logs/dashboard-deploy.log"
 PID_FILE="$HOME/clawd/nova-dashboard/.dashboard.pid"
 OPENCLAW_TOKEN="${OPENCLAW_TOKEN:-}"
+MIGRATE_MODE=false
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --migrate)
+            MIGRATE_MODE=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--migrate]"
+            exit 1
+            ;;
+    esac
+done
 
 log() {
     echo "[$(date -Iseconds)] $1" | tee -a "$LOG_FILE"
@@ -48,6 +64,67 @@ derive_db_name() {
 
 # Get database name
 DB_NAME=$(derive_db_name)
+
+# Migration mode: check for legacy nova_memory database
+if [ "$MIGRATE_MODE" = true ]; then
+    log "=== MIGRATION MODE ACTIVATED ==="
+    
+    # Check if legacy nova_memory exists and is different from new name
+    if [ "$DB_NAME" != "nova_memory" ]; then
+        if psql -lqt 2>/dev/null | cut -d \| -f 1 | grep -qw "nova_memory"; then
+            log "Found legacy database: nova_memory"
+            log "Target database name: $DB_NAME"
+            echo ""
+            echo "MIGRATION OPTIONS:"
+            echo "  1) Rename nova_memory → $DB_NAME (recommended)"
+            echo "  2) Create database alias (view)"
+            echo "  3) Skip migration"
+            echo ""
+            read -p "Choose option (1-3): " migration_choice
+            
+            case $migration_choice in
+                1)
+                    log "Renaming database nova_memory → $DB_NAME..."
+                    if psql -c "ALTER DATABASE nova_memory RENAME TO $DB_NAME;" 2>&1 | tee -a "$LOG_FILE"; then
+                        log "✅ Database renamed successfully"
+                    else
+                        log "❌ Database rename failed"
+                        exit 1
+                    fi
+                    ;;
+                2)
+                    log "Creating alias is not supported at database level."
+                    log "You can set PGUSER=nova to continue using nova_memory."
+                    exit 1
+                    ;;
+                3)
+                    log "Skipping database migration"
+                    ;;
+                *)
+                    log "Invalid choice, exiting"
+                    exit 1
+                    ;;
+            esac
+        else
+            log "No legacy nova_memory database found"
+        fi
+        
+        # Search for cron references to nova_memory
+        log ""
+        log "Searching for hardcoded 'nova_memory' references in cron jobs..."
+        if grep -r "nova_memory" /etc/cron* ~/clawd/ 2>/dev/null | grep -v "^Binary file"; then
+            log "⚠️  Found hardcoded references above. Please update them manually."
+            log "See MIGRATION.md for guidance."
+        else
+            log "No cron references found"
+        fi
+    else
+        log "Database name is already nova_memory (no migration needed)"
+    fi
+    
+    log "=== MIGRATION CHECK COMPLETE ==="
+    echo ""
+fi
 
 cd "$DASHBOARD_DIR"
 
