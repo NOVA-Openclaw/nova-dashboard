@@ -566,11 +566,6 @@
     <!-- Reports Section -->
     <div class="section-title"><span>Reports</span><span class="timestamp" id="reports-updated"></span></div>
     <div class="grid">
-      <div class="card wide" id="it-report-card" style="cursor: pointer;" onclick="openReport('itReport')">
-        <h3>📊 IT/Development Report</h3>
-        <div class="value small" id="it-report-date">—</div>
-        <div class="sub">Daily development activity summary</div>
-      </div>
       
       <div class="card wide" id="digest-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('dailyDigest')">
         <h3>📝 Daily Activity Digest</h3>
@@ -1027,16 +1022,8 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         reportsData = await res.json();
         
-        const itReport = reportsData.reports?.itReport;
         const digest = reportsData.reports?.dailyDigest;
         
-        // IT Report
-        if (itReport?.available && itReport.date) {
-          setText('it-report-date', itReport.date);
-          document.getElementById('it-report-card').style.opacity = '1';
-        } else {
-          setText('it-report-date', 'Not available');
-          document.getElementById('it-report-card').style.opacity = '0.5';
         }
         
         // Daily Digest
