@@ -45,6 +45,9 @@ app.get('/processes.json', async (req, res) => {
   }
 });
 
+// Redirect root to dashboard
+app.get('/', (req, res) => res.redirect('/dashboard/'));
+
 // Serve static files from public directory, fallback to root
 // Removed public/ - serve from root only
 app.use(express.static(__dirname));
