@@ -7,6 +7,7 @@ set -e
 DASHBOARD_DIR="$HOME/clawd/nova-dashboard"
 LOG_FILE="$HOME/clawd/logs/dashboard-deploy.log"
 PID_FILE="$HOME/clawd/nova-dashboard/.dashboard.pid"
+OPENCLAW_TOKEN="${OPENCLAW_TOKEN:-}"
 
 log() {
     echo "[$(date -Iseconds)] $1" | tee -a "$LOG_FILE"
@@ -49,11 +50,32 @@ else
 fi
 
 # Notify via agent_chat
+COMMIT_HASH=$(git rev-parse --short HEAD)
+TIMESTAMP=$(date -Iseconds)
+REPO_NAME="nova-dashboard"
+
 psql -d nova_memory -q << EOF
 INSERT INTO agent_chat (sender, message, mentions)
-VALUES ('system', 'nova-dashboard auto-deployed via post-merge hook.
-Commit: $(git rev-parse --short HEAD)
-Time: $(date -Iseconds)', ARRAY['NOVA']);
+VALUES ('system', '$REPO_NAME auto-deployed via post-merge hook.
+Commit: $COMMIT_HASH
+Time: $TIMESTAMP', ARRAY['NOVA']);
 EOF
+
+# Alert NOVA via wake event
+ALERT_MESSAGE="🚀 Deployment: $REPO_NAME @ $COMMIT_HASH ($TIMESTAMP)"
+
+if [ -n "$OPENCLAW_TOKEN" ]; then
+    if curl -X POST http://localhost:18789/api/cron/wake \
+         -H "Authorization: Bearer $OPENCLAW_TOKEN" \
+         -H "Content-Type: application/json" \
+         -d "{\"text\":\"$ALERT_MESSAGE\",\"mode\":\"now\"}" \
+         --max-time 5 --silent --show-error 2>&1; then
+        log "Wake alert sent successfully"
+    else
+        log "Warning: Wake alert failed (non-fatal)"
+    fi
+else
+    log "Warning: OPENCLAW_TOKEN not set, skipping wake alert"
+fi
 
 log "Deployment complete"
