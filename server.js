@@ -45,11 +45,13 @@ app.get('/processes.json', async (req, res) => {
   }
 });
 
-// Redirect root to dashboard
-app.get('/', (req, res) => res.redirect('/dashboard/'));
+// Serve dashboard at root (nginx proxies /dashboard/ here)
+// Note: Don't redirect - nginx handles /dashboard/ -> localhost:3847/
 
-// Serve static files from public directory, fallback to root
-// Removed public/ - serve from root only
+// Serve dashboard static files (nginx proxies /dashboard/ to root here)
+app.use(express.static(path.join(__dirname, 'dashboard')));
+
+// Also serve root directory for non-dashboard assets if needed
 app.use(express.static(__dirname));
 
 // Function to get top processes by CPU or memory
