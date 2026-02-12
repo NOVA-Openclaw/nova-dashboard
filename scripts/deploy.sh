@@ -6,7 +6,6 @@ set -e
 
 DASHBOARD_DIR="$HOME/clawd/nova-dashboard"
 LOG_FILE="$HOME/clawd/logs/dashboard-deploy.log"
-PID_FILE="$HOME/clawd/nova-dashboard/.dashboard.pid"
 OPENCLAW_TOKEN="${OPENCLAW_TOKEN:-}"
 MIGRATE_MODE=false
 
@@ -137,29 +136,33 @@ if git diff HEAD~1 --name-only 2>/dev/null | grep -q "package.json"; then
     npm install
 fi
 
-# Stop existing process if running
-if [ -f "$PID_FILE" ]; then
-    OLD_PID=$(cat "$PID_FILE")
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        log "Stopping existing dashboard (PID $OLD_PID)..."
-        kill "$OLD_PID"
-        sleep 2
-    fi
-    rm -f "$PID_FILE"
+# Restart dashboard service via systemctl
+log "Restarting dashboard service..."
+if systemctl --user restart nova-dashboard 2>&1 | tee -a "$LOG_FILE"; then
+    log "Service restart command completed"
+elif systemctl --user start nova-dashboard 2>&1 | tee -a "$LOG_FILE"; then
+    log "⚠️ Service restart failed, but start succeeded"
+else
+    log "⚠️ Warning: systemctl commands failed (service may not exist)"
 fi
 
-# Start dashboard
-log "Starting dashboard..."
-nohup node server.js > "$HOME/clawd/logs/dashboard.log" 2>&1 &
-NEW_PID=$!
-echo "$NEW_PID" > "$PID_FILE"
-
-# Verify it started (serve dashboard at root for nginx proxy)
+# Verify it started
 sleep 3
-if curl -s -o /dev/null -w "%{http_code}" http://localhost:3847/ | grep -q "200"; then
-    log "✅ Dashboard deployed successfully (PID $NEW_PID)"
+
+# Check systemctl status
+if systemctl --user is-active nova-dashboard >/dev/null 2>&1; then
+    SERVICE_STATUS="active"
+    log "✅ Service is active"
 else
-    log "⚠️ Dashboard may not have started correctly"
+    SERVICE_STATUS="inactive"
+    log "⚠️ Service is not active"
+fi
+
+# Check HTTP health
+if curl -s -o /dev/null -w "%{http_code}" http://localhost:3847/ | grep -q "200"; then
+    log "✅ Dashboard deployed successfully (HTTP 200)"
+else
+    log "⚠️ Dashboard may not have started correctly (HTTP check failed)"
 fi
 
 # Notify via agent_chat
