@@ -209,6 +209,136 @@
     }
     .wide { grid-column: span 2; }
     @media (max-width: 700px) { .wide { grid-column: span 2; } }
+    
+    /* Top Processes Styles */
+    .processes-container {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      margin-top: 1rem;
+      overflow: hidden;
+    }
+    .processes-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem 1.25rem;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.2s ease;
+    }
+    .processes-header:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .processes-title {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: #00d9ff;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .processes-toggle {
+      font-size: 0.75rem;
+      color: #888;
+      transition: transform 0.3s ease;
+    }
+    .processes-toggle.collapsed {
+      transform: rotate(-90deg);
+    }
+    .processes-controls {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .sort-btn {
+      padding: 0.25rem 0.75rem;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 6px;
+      color: #888;
+      font-size: 0.75rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .sort-btn:hover {
+      border-color: rgba(0, 217, 255, 0.4);
+      color: #00d9ff;
+    }
+    .sort-btn.active {
+      background: rgba(0, 217, 255, 0.15);
+      border-color: rgba(0, 217, 255, 0.4);
+      color: #00d9ff;
+    }
+    .processes-content {
+      max-height: 500px;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+    .processes-content.collapsed {
+      max-height: 0;
+    }
+    .processes-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .processes-table thead {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .processes-table th {
+      padding: 0.75rem 1.25rem;
+      text-align: left;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #666;
+      font-weight: 600;
+    }
+    .processes-table th:nth-child(2),
+    .processes-table th:nth-child(3),
+    .processes-table th:nth-child(4) {
+      text-align: right;
+    }
+    .processes-table td {
+      padding: 0.75rem 1.25rem;
+      font-size: 0.85rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .processes-table td:nth-child(1) {
+      color: #e0e0e0;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.75rem;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .processes-table td:nth-child(2),
+    .processes-table td:nth-child(3),
+    .processes-table td:nth-child(4) {
+      text-align: right;
+      color: #888;
+      font-family: 'Fira Code', monospace;
+      font-size: 0.8rem;
+    }
+    .processes-table td:nth-child(2) {
+      color: #00d9ff;
+    }
+    .processes-table td:nth-child(3) {
+      color: #a855f7;
+    }
+    .processes-error {
+      padding: 1.25rem;
+      color: #ef4444;
+      font-size: 0.85rem;
+      text-align: center;
+    }
+    @media (max-width: 700px) {
+      .processes-table td:nth-child(1) {
+        max-width: 200px;
+      }
+    }
+    
     footer {
       text-align: center;
       margin-top: 2rem;
@@ -365,6 +495,39 @@
         <div class="sub">↑<span id="net-tx">—</span></div>
       </div>
     </div>
+    
+    <!-- Top Processes -->
+    <div class="processes-container">
+      <div class="processes-header" onclick="toggleProcesses()">
+        <div class="processes-title">
+          <span>🔥 Top Resource Consuming Processes</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 1rem;">
+          <div class="processes-controls" onclick="event.stopPropagation()">
+            <button class="sort-btn active" id="sort-cpu" onclick="sortProcesses('cpu')">CPU</button>
+            <button class="sort-btn" id="sort-memory" onclick="sortProcesses('memory')">Memory</button>
+          </div>
+          <span class="processes-toggle">▼</span>
+        </div>
+      </div>
+      <div class="processes-content" id="processes-content">
+        <table class="processes-table">
+          <thead>
+            <tr>
+              <th>Process</th>
+              <th>CPU%</th>
+              <th>MEM%</th>
+              <th>User</th>
+            </tr>
+          </thead>
+          <tbody id="processes-tbody">
+            <tr>
+              <td colspan="4" style="text-align: center; color: #666; padding: 1.5rem;">Loading...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- PostgreSQL Stats -->
     <div class="section-title"><span>PostgreSQL — <span id="pg-db-name">nova_memory</span></span><span class="timestamp" id="postgres-updated"></span></div>
@@ -489,6 +652,77 @@
     // ====================
     // Data Loaders
     // ====================
+
+    // ====================
+    // Top Processes Functions
+    // ====================
+    
+    let currentProcessSort = 'cpu';
+    let processesCollapsed = false;
+    
+    function toggleProcesses() {
+      const content = document.getElementById('processes-content');
+      const toggle = document.querySelector('.processes-toggle');
+      
+      processesCollapsed = !processesCollapsed;
+      
+      if (processesCollapsed) {
+        content.classList.add('collapsed');
+        toggle.classList.add('collapsed');
+      } else {
+        content.classList.remove('collapsed');
+        toggle.classList.remove('collapsed');
+      }
+    }
+    
+    function sortProcesses(sortBy) {
+      currentProcessSort = sortBy;
+      
+      // Update button states
+      document.getElementById('sort-cpu').classList.toggle('active', sortBy === 'cpu');
+      document.getElementById('sort-memory').classList.toggle('active', sortBy === 'memory');
+      
+      // Reload processes with new sort
+      loadProcesses();
+    }
+    
+    async function loadProcesses() {
+      try {
+        const res = await fetch(`processes.json?sortBy=${currentProcessSort}&limit=5&_=${Date.now()}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        const tbody = document.getElementById('processes-tbody');
+        if (!tbody) return;
+        
+        if (data.error) {
+          tbody.innerHTML = `<tr><td colspan="4" class="processes-error">⚠️ ${data.error}</td></tr>`;
+          return;
+        }
+        
+        if (!data.processes || data.processes.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #666; padding: 1.5rem;">No processes found</td></tr>';
+          return;
+        }
+        
+        // Render process rows
+        tbody.innerHTML = data.processes.map(proc => `
+          <tr>
+            <td title="${proc.command}">${proc.command}</td>
+            <td>${proc.cpu}%</td>
+            <td>${proc.memory}%</td>
+            <td>${proc.user}</td>
+          </tr>
+        `).join('');
+        
+      } catch (e) {
+        console.error('Processes load error:', e);
+        const tbody = document.getElementById('processes-tbody');
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="4" class="processes-error">⚠️ Failed to load process data</td></tr>';
+        }
+      }
+    }
 
     async function loadStatus() {
       try {
@@ -855,6 +1089,7 @@
         loadStaff();
         loadPostgres();
         loadReports();
+        loadProcesses();
         document.querySelectorAll('.timestamp').forEach(el => el.style.opacity = '1');
       }, 500);
     }
@@ -870,6 +1105,7 @@
     loadStaff();
     loadPostgres();
     loadReports();
+    loadProcesses();
     
     // Auto-refresh every 5 minutes (matches cron update interval)
     setInterval(refreshAll, 300000);
