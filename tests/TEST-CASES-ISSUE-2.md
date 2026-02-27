@@ -2,9 +2,13 @@
 
 **Issue:** The dashboard scripts currently hardcode `nova_memory` as the database name. The fix should derive the database name from the OS username using the pattern `DB_NAME="${DB_USER//-/_}_memory"` where `DB_USER="${PGUSER:-$(whoami)}"`
 
-**Files to Update:**
+**Files Updated:**
 - `scripts/deploy.sh`
-- `scripts/update-dashboard-status.sh`
+- `scripts/update-dashboard.sh` (consolidated script — supersedes `update-dashboard-status.sh`)
+
+> **Note (2026-02-27):** `scripts/update-dashboard-status.sh` was replaced by the consolidated
+> `scripts/update-dashboard.sh` in issue #5. The dynamic DB naming logic from issue #2 is
+> preserved in the `update_status()` function within the consolidated script.
 
 ---
 

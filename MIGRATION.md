@@ -1,8 +1,10 @@
 # Database Naming Convention Migration Guide
 
-**Version:** 1.0  
-**Last Updated:** 2026-02-12  
+**Version:** 1.1  
+**Last Updated:** 2026-02-27  
 **Related Issues:** [#2](https://github.com/NOVA-Openclaw/nova-dashboard/issues/2), [#11](https://github.com/NOVA-Openclaw/nova-dashboard/issues/11)
+
+> **Path note:** Examples in this document reference `~/clawd/nova-dashboard/` which was the legacy installation path. The current default location is `~/nova-dashboard/` (or wherever you cloned the repo). Adjust paths accordingly.
 
 ## Overview
 
@@ -245,9 +247,11 @@ For each cron entry found in Phase 1, replace hardcoded references:
 */5 * * * * DB_NAME="${PGUSER:-$(whoami)}"; DB_NAME="${DB_NAME//-/_}_memory"; psql -d "$DB_NAME" -c "SELECT update_dashboard_status();" >> /var/log/dashboard.log 2>&1
 ```
 
-**After (Method 2 - Use updated script):**
+**After (Method 2 - Use consolidated script):**
 ```bash
-*/5 * * * * ~/clawd/nova-dashboard/scripts/update-dashboard-status.sh >> /var/log/dashboard.log 2>&1
+# The five separate scripts are now replaced by a single consolidated script.
+# See README.md for the recommended cron setup.
+*/5 * * * * /path/to/scripts/update-dashboard.sh >> /var/log/dashboard-cron.log 2>&1
 ```
 
 Apply changes:

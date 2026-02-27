@@ -1,5 +1,8 @@
 # Test Cases for Issue #18: Update deployment scripts to use systemctl for process control
 
+> **Note (2026-02-27):** Log path references in these test cases use the legacy `~/clawd/logs/`
+> path. The current log path is `~/.openclaw/logs/dashboard-deploy.log`. Adjust when re-running.
+
 ## 1. systemctl restart works correctly
 
 **Objective:** Verify that the `deploy.sh` script successfully restarts the nova-dashboard service using `systemctl`.

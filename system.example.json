@@ -1,8 +1,16 @@
 {
   "updated": "2026-01-01T00:00:00Z",
-  "cpu": 15,
-  "memory": 45,
-  "disk": 30,
-  "load": 0.5,
-  "uptime": "10 days"
+  "gateway": "running",
+  "channels": {
+    "telegram": { "status": "online", "latencyMs": 386, "bot": "@example_bot" },
+    "slack": { "status": "online", "latencyMs": 32, "bot": "mybot", "team": "My Team" },
+    "signal": { "status": "online", "latencyMs": 4 }
+  },
+  "uptime": { "seconds": 864000, "human": "10d 0h" },
+  "load": { "avg": "0.5 0.3 0.2", "load1": 0.5 },
+  "cpu": { "cores": 4 },
+  "memory": { "totalMB": 8192, "usedMB": 4096, "percent": 50 },
+  "disk": { "totalGB": 100, "usedGB": 30, "percent": 30 },
+  "network": { "rxBytes": 1000000, "txBytes": 500000 },
+  "processes": 150
 }

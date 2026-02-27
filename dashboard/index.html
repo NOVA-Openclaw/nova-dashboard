@@ -202,10 +202,47 @@
       animation: pulse 2s infinite;
     }
     .status-dot.green { background: #10b981; }
+    .status-dot.yellow { background: #f59e0b; }
     .status-dot.red { background: #ef4444; animation: none; }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
+    }
+    /* Channel status list inside status card */
+    .channel-status {
+      list-style: none;
+      margin-top: 0.75rem;
+      padding: 0;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      padding-top: 0.6rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .channel-status li {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      font-size: 0.75rem;
+      color: #888;
+    }
+    .channel-status .ch-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .channel-status .ch-dot.online  { background: #10b981; }
+    .channel-status .ch-dot.offline { background: #ef4444; }
+    .channel-status .ch-name { color: #bbb; text-transform: capitalize; }
+    .channel-status .ch-latency { color: #666; font-family: monospace; }
+    .channel-status .ch-bot { color: #666; font-style: italic; }
+    /* Stale data warning */
+    .stale-warning {
+      font-size: 0.7rem;
+      color: #f59e0b;
+      margin-top: 0.4rem;
+      display: none;
     }
     .wide { grid-column: span 2; }
     @media (max-width: 700px) { .wide { grid-column: span 2; } }
@@ -363,6 +400,8 @@
       <div class="card">
         <h3>Status</h3>
         <div class="value"><span class="status-dot green" id="status-dot"></span><span id="gateway-status">—</span></div>
+        <div class="stale-warning" id="stale-warning">⚠️ Data may be stale</div>
+        <ul class="channel-status" id="channel-list" style="display:none"></ul>
       </div>
       
       <div class="card">
@@ -633,14 +672,22 @@
     // Status Normalizer
     // ====================
     
-    // Normalize status strings to consistent values
+    // Normalize status strings to consistent internal values.
+    //
+    // The two status dimensions are:
+    //   Gateway: "running" | "stopped"  (is the OpenClaw gateway process alive?)
+    //   Channel: "online"  | "offline"  (did the channel's probe succeed?)
+    //
+    // These come from system.json, populated by `openclaw health --json`.
+    // We normalize to lowercase for safe comparison regardless of source casing.
     function normalizeStatus(status) {
       if (!status) return 'offline';
       const normalized = status.toLowerCase().trim();
-      // Treat both 'online' and 'running' as online
-      if (normalized === 'online' || normalized === 'running') return 'online';
+      if (normalized === 'online')  return 'online';
       if (normalized === 'offline') return 'offline';
-      // For other statuses, return as-is
+      if (normalized === 'running') return 'running';
+      if (normalized === 'stopped') return 'stopped';
+      // Unknown statuses pass through rather than silently becoming "offline"
       return normalized;
     }
 
@@ -753,14 +800,70 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        // Gateway status - normalize to 'online'/'offline'
+        // Derive a three-tier display status from gateway + channel data.
+        //
+        // The logic:
+        //   🟢 Online  — gateway is running AND at least one channel probe succeeded
+        //   🟡 Running — gateway is running BUT no channels are reporting online
+        //                (e.g. all probes failed, or no channels configured)
+        //   🔴 Offline — gateway process is not running (or health data is unavailable)
+        //
+        // This gives a more meaningful at-a-glance status than a binary on/off.
         const gatewayStatus = normalizeStatus(data.gateway);
-        const isOnline = gatewayStatus === 'online';
-        setText('gateway-status', isOnline ? 'Online' : 'Offline');
-        
+        const channels = data.channels || {};
+        const channelNames = Object.keys(channels);
+        const anyChannelOnline = channelNames.some(ch => (channels[ch].status || '') === 'online');
+
+        let displayLabel, dotClass;
+        if (gatewayStatus === 'running' && anyChannelOnline) {
+          displayLabel = 'Online';
+          dotClass = 'green';
+        } else if (gatewayStatus === 'running') {
+          // Gateway up but no channels confirmed online — amber/yellow state
+          displayLabel = 'Running';
+          dotClass = 'yellow';
+        } else {
+          displayLabel = 'Offline';
+          dotClass = 'red';
+        }
+        setText('gateway-status', displayLabel);
+
         const statusDot = document.getElementById('status-dot');
         if (statusDot) {
-          statusDot.className = 'status-dot ' + (isOnline ? 'green' : 'red');
+          statusDot.className = 'status-dot ' + dotClass;
+        }
+
+        // Stale data warning — if the system.json timestamp is > 15 minutes old,
+        // the cron job may have stopped running. Surface a visible warning.
+        const staleEl = document.getElementById('stale-warning');
+        if (staleEl && data.updated) {
+          const updatedMs = new Date(data.updated).getTime();
+          const ageMinutes = (Date.now() - updatedMs) / 60000;
+          staleEl.style.display = ageMinutes > 15 ? 'block' : 'none';
+        }
+
+        // Channel status list
+        const channelListEl = document.getElementById('channel-list');
+        if (channelListEl) {
+          if (channelNames.length > 0) {
+            channelListEl.style.display = '';
+            channelListEl.innerHTML = channelNames.map(name => {
+              const ch = channels[name] || {};
+              const chStatus = (ch.status || 'offline');
+              const latency = ch.latencyMs != null ? `${ch.latencyMs}ms` : null;
+              const bot = ch.bot || null;
+              const team = ch.team ? ` · ${ch.team}` : '';
+              const latencyHtml = latency ? `<span class="ch-latency">${latency}</span>` : '';
+              const botHtml = bot ? `<span class="ch-bot">${bot}${team}</span>` : (ch.team ? `<span class="ch-bot">${ch.team}</span>` : '');
+              return `<li>
+                <span class="ch-dot ${chStatus}"></span>
+                <span class="ch-name">${name}</span>
+                ${latencyHtml}${botHtml}
+              </li>`;
+            }).join('');
+          } else {
+            channelListEl.style.display = 'none';
+          }
         }
         
         // System stats
