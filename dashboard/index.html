@@ -672,9 +672,14 @@
     // Status Normalizer
     // ====================
     
-    // Normalize status strings to consistent values
-    // Gateway statuses: "running" | "stopped"
-    // Channel statuses: "online" | "offline"
+    // Normalize status strings to consistent internal values.
+    //
+    // The two status dimensions are:
+    //   Gateway: "running" | "stopped"  (is the OpenClaw gateway process alive?)
+    //   Channel: "online"  | "offline"  (did the channel's probe succeed?)
+    //
+    // These come from system.json, populated by `openclaw health --json`.
+    // We normalize to lowercase for safe comparison regardless of source casing.
     function normalizeStatus(status) {
       if (!status) return 'offline';
       const normalized = status.toLowerCase().trim();
@@ -682,7 +687,7 @@
       if (normalized === 'offline') return 'offline';
       if (normalized === 'running') return 'running';
       if (normalized === 'stopped') return 'stopped';
-      // For other statuses, return as-is
+      // Unknown statuses pass through rather than silently becoming "offline"
       return normalized;
     }
 
@@ -795,7 +800,15 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        // Gateway status — three-tier derived status
+        // Derive a three-tier display status from gateway + channel data.
+        //
+        // The logic:
+        //   🟢 Online  — gateway is running AND at least one channel probe succeeded
+        //   🟡 Running — gateway is running BUT no channels are reporting online
+        //                (e.g. all probes failed, or no channels configured)
+        //   🔴 Offline — gateway process is not running (or health data is unavailable)
+        //
+        // This gives a more meaningful at-a-glance status than a binary on/off.
         const gatewayStatus = normalizeStatus(data.gateway);
         const channels = data.channels || {};
         const channelNames = Object.keys(channels);
@@ -806,6 +819,7 @@
           displayLabel = 'Online';
           dotClass = 'green';
         } else if (gatewayStatus === 'running') {
+          // Gateway up but no channels confirmed online — amber/yellow state
           displayLabel = 'Running';
           dotClass = 'yellow';
         } else {
@@ -819,7 +833,8 @@
           statusDot.className = 'status-dot ' + dotClass;
         }
 
-        // Stale data warning — if updated > 15 minutes ago
+        // Stale data warning — if the system.json timestamp is > 15 minutes old,
+        // the cron job may have stopped running. Surface a visible warning.
         const staleEl = document.getElementById('stale-warning');
         if (staleEl && data.updated) {
           const updatedMs = new Date(data.updated).getTime();

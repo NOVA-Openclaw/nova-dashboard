@@ -1,11 +1,22 @@
 #!/bin/bash
 # nova-dashboard deployment script
-# Called by post-merge hook after git pull
+# Called by the post-merge hook after git pull, or run manually.
+#
+# Usage: ./scripts/deploy.sh [--migrate]
+#   --migrate   Run interactive database migration check (see MIGRATION.md)
+#
+# This script:
+#   1. Installs npm dependencies if package.json changed
+#   2. Restarts the nova-dashboard systemd --user service
+#   3. Verifies the service is healthy via HTTP
+#   4. Notifies the agent via agent_chat database insert + OpenClaw wake API
 
 set -e
 
-DASHBOARD_DIR="$HOME/clawd/nova-dashboard"
-LOG_FILE="$HOME/clawd/logs/dashboard-deploy.log"
+# DASHBOARD_DIR: root of the nova-dashboard repo checkout
+# Adjust this if your repo lives elsewhere.
+DASHBOARD_DIR="$HOME/nova-dashboard"
+LOG_FILE="$HOME/.openclaw/logs/dashboard-deploy.log"
 OPENCLAW_TOKEN="${OPENCLAW_TOKEN:-}"
 MIGRATE_MODE=false
 
@@ -110,8 +121,8 @@ if [ "$MIGRATE_MODE" = true ]; then
         
         # Search for cron references to nova_memory
         log ""
-        log "Searching for hardcoded 'nova_memory' references in cron jobs..."
-        if grep -r "nova_memory" /etc/cron* ~/clawd/ 2>/dev/null | grep -v "^Binary file"; then
+        log "Searching for hardcoded 'nova_memory' references in cron jobs and home directory..."
+        if grep -r "nova_memory" /etc/cron* "$HOME" 2>/dev/null | grep -v "^Binary file"; then
             log "⚠️  Found hardcoded references above. Please update them manually."
             log "See MIGRATION.md for guidance."
         else

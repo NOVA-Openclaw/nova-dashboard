@@ -1,8 +1,28 @@
 #!/usr/bin/env bash
-# Consolidated Nova Dashboard updater
-# Replaces: update-dashboard.sh, update-dashboard-status.sh, update-staff-dashboard.sh,
-#           dashboard-postgres.sh, update-anthropic-dashboard.sh
-# Run via cron every 5 minutes (anthropic section throttled to every 15 minutes)
+# =============================================================================
+# Nova Dashboard Updater (Consolidated)
+# =============================================================================
+#
+# Populates all JSON data files read by dashboard/index.html.
+# Replaces five separate cron scripts with a single entry point:
+#   - update-dashboard.sh        (system.json)
+#   - update-dashboard-status.sh (status.json)
+#   - update-staff-dashboard.sh  (staff.json)
+#   - dashboard-postgres.sh      (postgres.json)
+#   - update-anthropic-dashboard.sh (anthropic.json)
+#
+# USAGE:
+#   NOVA_DASHBOARD_DIR=/path/to/output ./scripts/update-dashboard.sh
+#
+# CRON SETUP (single entry — runs every 5 min):
+#   */5 * * * * /path/to/scripts/update-dashboard.sh >> /var/log/dashboard-cron.log 2>&1
+#
+# The Anthropic section self-throttles to 15-minute intervals.
+# Each section is isolated in a subshell; a failure in one leaves the others unaffected.
+#
+# REQUIREMENTS: jq, psql, curl, openclaw (for system section)
+#               op (1Password CLI, for anthropic section only)
+# =============================================================================
 
 set -e  # Exit on error at script level; individual sections trap their own errors
 
@@ -66,27 +86,37 @@ derive_db_name() {
 }
 
 # ====================
-# Section: Gateway & Channel Status (NEW)
+# Section: System — Gateway, Channel Status, and System Metrics
+# ====================
+# Outputs: system.json
+# Data sources:
+#   - `openclaw health --json` for gateway/channel status
+#   - /proc/uptime, /proc/loadavg, free, df, nproc, ip route for system metrics
 # ====================
 update_system() {
     local out_file="${OUTPUT_DIR}/system.json"
     local tmp_file="${out_file}.tmp"
 
     # --- Gateway & channel status ---
+    # Default to stopped/empty until we confirm the gateway responds
     local gateway_status="stopped"
     local channels_json="{}"
 
     local health_raw
     if health_raw=$(timeout 15 openclaw health --json --timeout 10000 2>/dev/null); then
-        # Strip any non-JSON prefix lines (logging output before the JSON object)
+        # Strip any non-JSON prefix lines (logging output before the JSON object).
+        # The openclaw CLI may emit log lines before the JSON payload; sed discards them.
         local health_json
         health_json=$(echo "$health_raw" | sed -n '/^{/,$p')
 
         if echo "$health_json" | jq empty 2>/dev/null; then
             gateway_status="running"
 
-            # Build channels object from probe data
-            # Expected structure: { channels: { <name>: { probe: { ok, elapsedMs, bot, team } } } }
+            # Build channels object from probe data.
+            # openclaw health --json returns:
+            #   { channels: { <name>: { probe: { ok, elapsedMs, bot, team } } } }
+            # We map each channel to: { status, latencyMs?, bot?, team? }
+            # Null fields are stripped with_entries(select(.value != null)) for cleaner JSON.
             channels_json=$(echo "$health_json" | jq -c '
                 .channels // {} | to_entries | map({
                     key: .key,
@@ -98,14 +128,15 @@ update_system() {
                             bot: (.probe.bot.username // .probe.bot.name // null),
                             team: (if (.probe.team.name // null) != null then .probe.team.name else null end)
                         } |
-                        # Remove null fields for cleanliness
+                        # Remove null fields so the JSON stays lean
                         with_entries(select(.value != null))
                     )
                 }) | from_entries
             ' 2>/dev/null || echo "{}")
         fi
     else
-        # Fallback: check if openclaw-gateway process is running
+        # Fallback when `openclaw health` fails or times out.
+        # Check for the gateway process directly — gives "running" without channel data.
         if pgrep -u "$(whoami)" -f "openclaw-gateway" > /dev/null 2>&1; then
             gateway_status="running"
         else
@@ -114,7 +145,7 @@ update_system() {
         channels_json="{}"
     fi
 
-    # --- System metrics ---
+    # --- System metrics (read directly from /proc and standard Linux tools) ---
     local uptime_seconds
     uptime_seconds=$(cut -d' ' -f1 /proc/uptime | cut -d'.' -f1)
     local load
@@ -191,7 +222,14 @@ update_system() {
 }
 
 # ====================
-# Section: Agent Status (formerly update-dashboard-status.sh)
+# Section: Agent Status
+# ====================
+# Outputs: status.json
+# Data sources:
+#   - PostgreSQL (entity_facts table) for compaction count/timestamp
+#   - Context window and session data come from the agent when active;
+#     this cron script sets them to zero/placeholder defaults.
+# Previously: update-dashboard-status.sh
 # ====================
 update_status() {
     local out_file="${OUTPUT_DIR}/status.json"
@@ -203,7 +241,8 @@ update_status() {
         return 0
     fi
 
-    # Get compaction data from database
+    # Fetch compaction count and timestamp from the database.
+    # entity_id=1 is NOVA's primary agent entity; key='compaction_count' stores the running total.
     local compaction_data compactions last_compaction
     compaction_data=$(psql -d "$db_name" -t -A -F'|' -c \
         "SELECT value, data->>'lastCompaction' FROM entity_facts WHERE entity_id=1 AND key='compaction_count';" \
@@ -242,14 +281,21 @@ EOF
 }
 
 # ====================
-# Section: Staff (formerly update-staff-dashboard.sh)
+# Section: Staff
+# ====================
+# Outputs: staff.json
+# Data sources:
+#   - PostgreSQL (agents table) for active agent list
+#   - HTTP health check on localhost:18800 for Newhart (graduated NHR instance)
+# Previously: update-staff-dashboard.sh
 # ====================
 update_staff() {
     local out_file="${OUTPUT_DIR}/staff.json"
     local tmp_file="${out_file}.tmp"
     local db_name
 
-    # Check Newhart's gateway status (port 18800)
+    # Newhart is a graduated NOVA instance running its own OpenClaw gateway on port 18800.
+    # Try HTTP health check first; fall back to process detection if the gateway isn't responding.
     local newhart_status="offline"
     if curl -s --max-time 2 "http://localhost:18800/health" > /dev/null 2>&1; then
         newhart_status="online"
@@ -314,7 +360,14 @@ EOF
 }
 
 # ====================
-# Section: PostgreSQL (formerly dashboard-postgres.sh)
+# Section: PostgreSQL Stats
+# ====================
+# Outputs: postgres.json
+# Data sources:
+#   - pg_database_size() for database size
+#   - pg_stat_database for performance counters (cache hit ratio, transactions, tuples)
+#   - pg_tables + pg_total_relation_size for per-table sizes
+# Previously: dashboard-postgres.sh
 # ====================
 update_postgres() {
     local out_file="${OUTPUT_DIR}/postgres.json"
@@ -417,14 +470,24 @@ EOF
 }
 
 # ====================
-# Section: Anthropic (formerly update-anthropic-dashboard.sh)
-# Throttled: only refreshes every 15 minutes
+# Section: Anthropic API Costs
+# ====================
+# Outputs: anthropic.json
+# Data sources:
+#   - Anthropic Admin API: /v1/organizations/cost_report (paginated)
+#   - Anthropic Admin API: /v1/organizations/usage_report/messages (paginated)
+#   - 1Password CLI for Admin API key retrieval
+#   - session-activity.jsonl for active-time cost-per-hour calculation
+# Throttle: skips update if anthropic.json is < 15 minutes old
+# Previously: update-anthropic-dashboard.sh
 # ====================
 update_anthropic() {
     local out_file="${OUTPUT_DIR}/anthropic.json"
     local tmp_file="${out_file}.tmp"
 
-    # --- Throttle: skip if updated < 15 minutes ago ---
+    # --- Throttle: skip the expensive API calls if data is fresh enough ---
+    # The Anthropic cost_report API has a ~15-minute reporting lag anyway,
+    # so updating more frequently would return identical data.
     if [ -f "$out_file" ]; then
         local last_updated
         last_updated=$(jq -r '.updated // empty' "$out_file" 2>/dev/null || true)
@@ -741,8 +804,12 @@ EOF
 }
 
 # ====================
-# Run all sections
-# Each wrapped in error handling so one failure doesn't kill the others
+# Main: Run all sections
+# ====================
+# Each section is invoked in a subshell ( ... ) so that:
+#   1. set -e errors inside a section don't terminate the entire script
+#   2. A failure in one section is logged as a warning and the rest continue
+# The anthropic section manages its own subshell internally.
 # ====================
 
 echo "=== Nova Dashboard Update: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
