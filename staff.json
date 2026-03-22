@@ -1,0 +1,13 @@
+{
+  "updated": "2026-03-08T06:05:07Z",
+  "newhart": {
+    "status": "online",
+    "port": 18800,
+    "user": "newhart",
+    "dashboardUrl": null
+  },
+  "agents": [],
+  "metrics": {
+    "note": "Token/cost tracking coming soon - requires Anthropic API metadata attribution"
+  }
+}

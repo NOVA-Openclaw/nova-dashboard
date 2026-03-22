@@ -1,0 +1,29 @@
+{
+  "updated": "2026-03-08T06:05:07Z",
+  "database": {
+    "name": "nova_memory",
+    "sizeBytes": 0,
+    "size": "-",
+    "connections": 0
+  },
+  "stats": {
+    "backends": 0,
+    "transactions": {
+      "commits": 0,
+      "rollbacks": 0
+    },
+    "blocks": {
+      "read": 0,
+      "hit": 0
+    },
+    "cacheHitRatio": 0,
+    "tuples": {
+      "returned": 0,
+      "fetched": 0,
+      "inserted": 0,
+      "updated": 0,
+      "deleted": 0
+    }
+  },
+  "tables": []
+}

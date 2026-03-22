@@ -1,0 +1,35 @@
+{
+  "updated": "2026-03-08T11:00:05Z",
+  "reports": {
+    "devopsReport": {
+      "available": true,
+      "date": "2026-03-07",
+      "url": "/reports/latest-devops-report.html",
+      "title": "IT/DevOps Report"
+    },
+    "sweReport": {
+      "available": true,
+      "date": "2026-03-07",
+      "url": "/reports/latest-swe-report.html",
+      "title": "Software Engineering Report"
+    },
+    "mindReport": {
+      "available": true,
+      "date": "2026-03-07",
+      "url": "/reports/latest-mind-report.html",
+      "title": "Mind Report"
+    },
+    "dailyDigest": {
+      "available": false,
+      "date": null,
+      "url": "/reports/latest-daily-digest.html",
+      "title": "Daily Activity Digest"
+    },
+    "commsDigest": {
+      "available": true,
+      "date": "2026-03-08",
+      "url": "/reports/latest-comms-digest.html",
+      "title": "Communications Digest"
+    }
+  }
+}
