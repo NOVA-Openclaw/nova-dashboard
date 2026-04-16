@@ -260,6 +260,40 @@ update_status() {
     local updated
     updated=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
+    # Read model and agent name from openclaw.json (dynamic, not hardcoded)
+    local openclaw_config="${HOME}/.openclaw/openclaw.json"
+    local model_string="unknown"
+    local agent_name="nova"
+
+    if [ -f "$openclaw_config" ]; then
+        # Primary model: agents.defaults.model.primary or agents.defaults.model (string)
+        model_string=$(jq -r '
+            .agents.defaults.model.primary //
+            (if (.agents.defaults.model | type) == "string" then .agents.defaults.model else null end) //
+            "unknown"
+        ' "$openclaw_config" 2>/dev/null || echo "unknown")
+
+        # Agent name: first agent in list with id matching the primary, or the first one
+        # For NOVA, we look for the main agent identity
+        agent_name=$(jq -r '
+            (.agents.list[] | select(.id == "nova") | .id) //
+            (.agents.list[0].id) //
+            "main"
+        ' "$openclaw_config" 2>/dev/null || echo "nova")
+    fi
+
+    # Derive provider from model string prefix (e.g., "openrouter/anthropic/claude-opus-4-6")
+    local provider=""
+    if [[ "$model_string" == openrouter/* ]]; then
+        provider="OpenRouter"
+    elif [[ "$model_string" == anthropic/* ]]; then
+        provider="Anthropic"
+    elif [[ "$model_string" == openai/* ]]; then
+        provider="OpenAI"
+    elif [[ "$model_string" == google/* ]]; then
+        provider="Google"
+    fi
+
     cat > "$tmp_file" << EOF
 {
   "context": {
@@ -268,10 +302,11 @@ update_status() {
     "percent": 0
   },
   "compactions": $compactions,
-  "model": "anthropic/claude-opus-4-5",
+  "model": "$model_string",
+  "provider": $([ -n "$provider" ] && echo "\"$provider\"" || echo "null"),
   "lastCompaction": $last_compaction,
   "updated": "$updated",
-  "session": "agent:main:main",
+  "session": "agent:${agent_name}:main",
   "source": "cron"
 }
 EOF

@@ -407,6 +407,7 @@
       <div class="card">
         <h3>Model</h3>
         <div class="value small" id="model">—</div>
+        <div class="sub" id="model-provider"></div>
       </div>
       
       <div class="card">
@@ -772,7 +773,20 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        setText('model', data.model);
+        // Display model with provider tag
+        if (data.model) {
+          // Strip routing provider prefix for display
+          // e.g., "openrouter/anthropic/claude-opus-4-6" → "anthropic/claude-opus-4-6"
+          let displayModel = data.model;
+          if (data.provider) {
+            const prefix = data.provider.toLowerCase() + '/';
+            if (data.model.startsWith(prefix)) {
+              displayModel = data.model.slice(prefix.length);
+            }
+          }
+          setText('model', displayModel);
+          setText('model-provider', data.provider ? 'via ' + data.provider : '');
+        }
         setText('compactions', data.compactions);
         setText('session', data.session);
         setText('context-percent', data.context?.percent);
