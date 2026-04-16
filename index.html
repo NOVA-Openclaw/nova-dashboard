@@ -973,23 +973,38 @@
         if (!grid) return;
         grid.innerHTML = '';
         
-        // Render Newhart (graduated instance) first if present
-        if (data.newhart) {
-          const nh = data.newhart;
-          const nhStatus = normalizeStatus(nh.status);
-          const isOnline = nhStatus === 'online';
+        // Render peer agents (full instances with their own gateways)
+        // Support both new `peers` object and legacy `newhart` key
+        const peers = data.peers || {};
+        
+        // If no `peers` key, fall back to legacy `newhart` structure
+        if (Object.keys(peers).length === 0 && data.newhart) {
+          peers.newhart = { ...data.newhart, role: 'NHR Agent' };
+        }
+        
+        // Peer display config: initials, colors, labels
+        const peerMeta = {
+          newhart:   { initials: 'NH', label: 'NHR Agent • Full Instance', gradient: 'linear-gradient(135deg, #00d9ff, #a855f7)' },
+          graybeard: { initials: 'GB', label: 'IT/SysAdmin • Full Instance', gradient: 'linear-gradient(135deg, #6b7280, #d1d5db)' }
+        };
+        
+        Object.entries(peers).forEach(([name, peer]) => {
+          const peerStatus = normalizeStatus(peer.status);
+          const isOnline = peerStatus === 'online';
+          const meta = peerMeta[name] || { initials: name.slice(0, 2).toUpperCase(), label: (peer.role || 'Peer Agent') + ' • Full Instance', gradient: 'linear-gradient(135deg, #00d9ff, #a855f7)' };
+          const displayName = name.charAt(0).toUpperCase() + name.slice(1);
           
           const card = document.createElement('a');
           card.className = 'staff-card primary';
-          card.href = nh.dashboardUrl || '#';
-          if (!nh.dashboardUrl) card.style.cursor = 'default';
+          card.href = peer.dashboardUrl || '#';
+          if (!peer.dashboardUrl) card.style.cursor = 'default';
           
           card.innerHTML = `
             <div class="staff-header">
-              <div class="staff-avatar">NH</div>
+              <div class="staff-avatar" style="background: ${meta.gradient}">${meta.initials}</div>
               <div>
-                <div class="staff-name">Newhart</div>
-                <div class="staff-role">NHR Agent • Full Instance</div>
+                <div class="staff-name">${displayName}</div>
+                <div class="staff-role">${meta.label}</div>
               </div>
             </div>
             <div class="staff-meta">
@@ -997,17 +1012,17 @@
                 <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
                 ${isOnline ? 'Online' : 'Offline'}
               </div>
-              <div class="model">:${nh.port || '—'}</div>
+              <div class="model">:${peer.port || '—'}</div>
             </div>
           `;
           grid.appendChild(card);
-        }
+        });
         
         // Render sub-agents
         const agents = data.agents || [];
         agents.forEach(agent => {
-          // Skip nova-main (that's me) and nhr-agent (Newhart shown above)
-          if (agent.name === 'nova-main' || agent.name === 'nhr-agent') return;
+          // Skip primary agent and peer agents (shown separately above)
+          if (agent.name === 'nova-main' || agent.name === 'nhr-agent' || agent.name === 'graybeard') return;
           
           const card = document.createElement('a');
           card.className = 'staff-card';
