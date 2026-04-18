@@ -839,6 +839,122 @@ EOF
 }
 
 # ====================
+# Section: Reports
+# ====================
+# Outputs: reports.json
+# Data sources:
+#   - ~/www/static/reports/ directory — scans for report files and latest-* symlinks
+#   - Report types: Daily Digest, Communications Digest, IT/DevOps, SWE, Mind
+# ====================
+update_reports() {
+    local out_file="${OUTPUT_DIR}/reports.json"
+    local tmp_file="${out_file}.tmp"
+    local reports_dir="${HOME}/www/static/reports"
+
+    if [ ! -d "$reports_dir" ]; then
+        echo "WARN: Reports directory $reports_dir does not exist; skipping reports.json update" >&2
+        return 0
+    fi
+
+    # Helper: find the most recent report file matching a glob pattern and extract its date.
+    # Args: $1 = file prefix (e.g., "NOVA_Comms_Digest")
+    # Outputs: "date|filename" or empty string if none found
+    _latest_report() {
+        local prefix="$1"
+        local latest_file
+        # Files are named <prefix>_YYYY-MM-DD.html — sort by name descending gives newest first
+        latest_file=$(ls -1 "${reports_dir}/${prefix}_"????-??-??.html 2>/dev/null | sort -r | head -1)
+        if [ -n "$latest_file" ]; then
+            local basename
+            basename=$(basename "$latest_file")
+            # Extract date from filename: everything after the last _ and before .html
+            local date_part
+            date_part=$(echo "$basename" | grep -oP '\d{4}-\d{2}-\d{2}(?=\.html$)')
+            echo "${date_part}|${basename}"
+        fi
+    }
+
+    # Build report entries
+    # Map: json_key|file_prefix|symlink_name|display_title
+    local report_defs=(
+        "dailyDigest|NOVA_Daily_Digest|latest-daily-digest.html|Daily Activity Digest"
+        "commsDigest|NOVA_Comms_Digest|latest-comms-digest.html|Communications Digest"
+        "devopsReport|NOVA_IT_DevOps_Report|latest-devops-report.html|IT/DevOps Report"
+        "sweReport|NOVA_SWE_Report|latest-swe-report.html|Software Engineering Report"
+        "mindReport|NOVA_Mind_Report|latest-mind-report.html|Mind Report"
+    )
+
+    # Start building JSON
+    local reports_obj="{}"
+
+    for def in "${report_defs[@]}"; do
+        IFS='|' read -r json_key file_prefix symlink_name title <<< "$def"
+
+        local result available="false" date="null" url="null"
+
+        result=$(_latest_report "$file_prefix")
+
+        if [ -n "$result" ]; then
+            local report_date report_filename
+            IFS='|' read -r report_date report_filename <<< "$result"
+
+            if [ -n "$report_date" ]; then
+                available="true"
+                date="\"$report_date\""
+
+                # Prefer the latest-* symlink URL if it exists; otherwise link directly to the file
+                if [ -L "${reports_dir}/${symlink_name}" ]; then
+                    url="\"/reports/${symlink_name}\""
+                else
+                    url="\"/reports/${report_filename}\""
+                fi
+            fi
+        else
+            # Also check for the legacy NOVA_IT_Report prefix (older devops reports)
+            if [ "$json_key" = "devopsReport" ]; then
+                result=$(_latest_report "NOVA_IT_Report")
+                if [ -n "$result" ]; then
+                    local report_date report_filename
+                    IFS='|' read -r report_date report_filename <<< "$result"
+                    if [ -n "$report_date" ]; then
+                        available="true"
+                        date="\"$report_date\""
+                        if [ -L "${reports_dir}/${symlink_name}" ]; then
+                            url="\"/reports/${symlink_name}\""
+                        else
+                            url="\"/reports/${report_filename}\""
+                        fi
+                    fi
+                fi
+            fi
+        fi
+
+        reports_obj=$(echo "$reports_obj" | jq \
+            --arg key "$json_key" \
+            --argjson available "$available" \
+            --argjson date "$date" \
+            --argjson url "$url" \
+            --arg title "$title" \
+            '. + {($key): {available: $available, date: $date, url: $url, title: $title}}')
+    done
+
+    # Write the final reports.json
+    jq -n \
+        --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson reports "$reports_obj" \
+        '{updated: $updated, reports: $reports}' > "$tmp_file"
+
+    if ! jq . "$tmp_file" > /dev/null 2>&1; then
+        echo "ERROR: Generated invalid JSON for reports.json" >&2
+        rm -f "$tmp_file"
+        return 1
+    fi
+
+    mv "$tmp_file" "$out_file"
+    echo "reports.json updated at $(date)"
+}
+
+# ====================
 # Main: Run all sections
 # ====================
 # Each section is invoked in a subshell ( ... ) so that:
@@ -853,6 +969,7 @@ echo "=== Nova Dashboard Update: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 ( update_status ) || echo "WARN: status.json update failed" >&2
 ( update_staff )  || echo "WARN: staff.json update failed" >&2
 ( update_postgres ) || echo "WARN: postgres.json update failed" >&2
+( update_reports ) || echo "WARN: reports.json update failed" >&2
 update_anthropic   # already handles its own errors internally
 
 echo "=== Dashboard update complete ==="
