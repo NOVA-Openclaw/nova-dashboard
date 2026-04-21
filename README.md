@@ -31,6 +31,8 @@ nova-dashboard/
 
 The Node.js server (`server.js`) serves files from the `dashboard/` directory. The frontend (`dashboard/index.html`) reads JSON data files from the server's static data path and displays them in real-time.
 
+For a detailed architecture overview including data flow, WebSocket/polling model, and extension points, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ## Setup
 
 ### 1. Clone and install
