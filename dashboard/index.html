@@ -444,8 +444,8 @@
       </div>
     </div>
 
-    <!-- Anthropic API Stats - Current Month -->
-    <div class="section-title"><span>Anthropic API — <span id="api-month">Month</span></span><span class="timestamp" id="anthropic-updated"></span></div>
+    <!-- OpenRouter API Stats - Current Month -->
+    <div class="section-title"><span>OpenRouter — <span id="api-month">Month</span></span><span class="timestamp" id="anthropic-updated"></span></div>
     <div class="grid">
       <div class="card">
         <h3>MTD Spend</h3>
@@ -910,8 +910,9 @@
     }
     
     async function loadAnthropic() {
+      // Kept name for drop-in compatibility; now fetches openrouter.json.
       try {
-        const res = await fetch('anthropic.json?' + Date.now());
+        const res = await fetch('openrouter.json?' + Date.now());
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
@@ -973,7 +974,7 @@
           setText('anthropic-updated', 'Updated ' + timeAgo(d));
         }
       } catch (e) {
-        console.error('Anthropic load error:', e);
+        console.error('OpenRouter load error:', e);
       }
     }
 
