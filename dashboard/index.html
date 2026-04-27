@@ -1003,7 +1003,7 @@
               <div class="staff-avatar">NH</div>
               <div>
                 <div class="staff-name">Newhart</div>
-                <div class="staff-role">NHR Agent • Full Instance</div>
+                <div class="staff-role">Peer Agent • Full Instance</div>
               </div>
             </div>
             <div class="staff-meta">
@@ -1012,6 +1012,36 @@
                 ${isOnline ? 'Online' : 'Offline'}
               </div>
               <div class="model">:${nh.port || '—'}</div>
+            </div>
+          `;
+          grid.appendChild(card);
+        }
+        
+        // Render Graybeard (peer agent) second if present
+        if (data.graybeard) {
+          const gb = data.graybeard;
+          const gbStatus = normalizeStatus(gb.status);
+          const isOnline = gbStatus === 'online';
+          
+          const card = document.createElement('a');
+          card.className = 'staff-card primary';
+          card.href = gb.dashboardUrl || '#';
+          if (!gb.dashboardUrl) card.style.cursor = 'default';
+          
+          card.innerHTML = `
+            <div class="staff-header">
+              <div class="staff-avatar">GB</div>
+              <div>
+                <div class="staff-name">Graybeard</div>
+                <div class="staff-role">Peer Agent • Full Instance</div>
+              </div>
+            </div>
+            <div class="staff-meta">
+              <div class="staff-status">
+                <span class="dot ${isOnline ? 'online' : 'offline'}"></span>
+                ${isOnline ? 'Online' : 'Offline'}
+              </div>
+              <div class="model">:${gb.port || '—'}</div>
             </div>
           `;
           grid.appendChild(card);

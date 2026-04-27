@@ -329,13 +329,23 @@ update_staff() {
     local tmp_file="${out_file}.tmp"
     local db_name
 
-    # Newhart is a graduated NOVA instance running its own OpenClaw gateway on port 18800.
+    # Peer agents run their own OpenClaw gateways on dedicated ports.
     # Try HTTP health check first; fall back to process detection if the gateway isn't responding.
+
+    # Newhart — graduated NOVA instance on port 18700
     local newhart_status="offline"
-    if curl -s --max-time 2 "http://localhost:18800/health" > /dev/null 2>&1; then
+    if curl -s --max-time 2 "http://localhost:18700/health" > /dev/null 2>&1; then
         newhart_status="online"
     elif pgrep -u newhart -f "openclaw" > /dev/null 2>&1; then
         newhart_status="online"
+    fi
+
+    # Graybeard — peer agent on port 18800
+    local graybeard_status="offline"
+    if curl -s --max-time 2 "http://localhost:18800/health" > /dev/null 2>&1; then
+        graybeard_status="online"
+    elif pgrep -u graybeard -f "openclaw" > /dev/null 2>&1; then
+        graybeard_status="online"
     fi
 
     # Query agents from database
@@ -379,8 +389,14 @@ FROM (
   "updated": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "newhart": {
     "status": "$newhart_status",
-    "port": 18800,
+    "port": 18700,
     "user": "newhart",
+    "dashboardUrl": null
+  },
+  "graybeard": {
+    "status": "$graybeard_status",
+    "port": 18800,
+    "user": "graybeard",
     "dashboardUrl": null
   },
   "agents": $agents_json,
