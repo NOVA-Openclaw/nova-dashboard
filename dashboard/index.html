@@ -407,7 +407,6 @@
       <div class="card">
         <h3>Model</h3>
         <div class="value small" id="model">—</div>
-        <div class="sub" id="model-provider"></div>
       </div>
       
       <div class="card">
@@ -607,16 +606,34 @@
     <div class="section-title"><span>Reports</span><span class="timestamp" id="reports-updated"></span></div>
     <div class="grid">
       
-      <div class="card wide" id="digest-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('dailyDigest')">
+      <div class="card wide report-card" id="digest-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('dailyDigest')">
         <h3>📝 Daily Activity Digest</h3>
         <div class="value small" id="digest-date">—</div>
         <div class="sub">Tasks, tokens, and highlights</div>
       </div>
       
-      <div class="card wide" id="comms-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('commsDigest')">
+      <div class="card wide report-card" id="comms-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('commsDigest')">
         <h3>📬 Communications Digest</h3>
         <div class="value small" id="comms-date">—</div>
         <div class="sub">Email & social activity summary</div>
+      </div>
+
+      <div class="card wide report-card" id="devops-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('devopsReport')">
+        <h3>🔧 IT/DevOps Report</h3>
+        <div class="value small" id="devops-date">—</div>
+        <div class="sub">Infrastructure and operations</div>
+      </div>
+
+      <div class="card wide report-card" id="swe-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('sweReport')">
+        <h3>💻 Software Engineering Report</h3>
+        <div class="value small" id="swe-date">—</div>
+        <div class="sub">Code, PRs, and development progress</div>
+      </div>
+
+      <div class="card wide report-card" id="mind-card" style="cursor: pointer; opacity: 0.5;" onclick="openReport('mindReport')">
+        <h3>🧠 Mind Report</h3>
+        <div class="value small" id="mind-date">—</div>
+        <div class="sub">Cognitive metrics and memory health</div>
       </div>
     </div>
 
@@ -773,20 +790,7 @@
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
-        // Display model with provider tag
-        if (data.model) {
-          // Strip routing provider prefix for display
-          // e.g., "openrouter/anthropic/claude-opus-4-6" → "anthropic/claude-opus-4-6"
-          let displayModel = data.model;
-          if (data.provider) {
-            const prefix = data.provider.toLowerCase() + '/';
-            if (data.model.startsWith(prefix)) {
-              displayModel = data.model.slice(prefix.length);
-            }
-          }
-          setText('model', displayModel);
-          setText('model-provider', data.provider ? 'via ' + data.provider : '');
-        }
+        setText('model', data.model);
         setText('compactions', data.compactions);
         setText('session', data.session);
         setText('context-percent', data.context?.percent);
@@ -1138,26 +1142,28 @@
         const res = await fetch('reports.json?' + Date.now());
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         reportsData = await res.json();
-        
-        const digest = reportsData.reports?.dailyDigest;
-        
-        // Daily Digest
-        if (digest?.available && digest.date) {
-          setText('digest-date', digest.date);
-          document.getElementById('digest-card').style.opacity = '1';
-        } else {
-          setText('digest-date', 'Not available');
-          document.getElementById('digest-card').style.opacity = '0.5';
-        }
-        
-        // Communications Digest
-        const comms = reportsData.reports?.commsDigest;
-        if (comms?.available && comms.date) {
-          setText('comms-date', comms.date);
-          document.getElementById('comms-card').style.opacity = '1';
-        } else {
-          setText('comms-date', 'Not available');
-          document.getElementById('comms-card').style.opacity = '0.5';
+
+        // Map report keys to their card/date element IDs
+        const reportCards = {
+          dailyDigest:  { card: 'digest-card',  date: 'digest-date' },
+          commsDigest:  { card: 'comms-card',   date: 'comms-date' },
+          devopsReport: { card: 'devops-card',  date: 'devops-date' },
+          sweReport:    { card: 'swe-card',     date: 'swe-date' },
+          mindReport:   { card: 'mind-card',    date: 'mind-date' },
+        };
+
+        for (const [key, els] of Object.entries(reportCards)) {
+          const report = reportsData.reports?.[key];
+          const cardEl = document.getElementById(els.card);
+          if (!cardEl) continue;
+
+          if (report?.available && report.date) {
+            setText(els.date, report.date);
+            cardEl.style.opacity = '1';
+          } else {
+            setText(els.date, 'Not available');
+            cardEl.style.opacity = '0.5';
+          }
         }
         
         if (reportsData.updated) {

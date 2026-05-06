@@ -47,8 +47,8 @@ fi
 echo ""
 echo "[ Execution ]"
 # We override NOVA_DASHBOARD_DIR so output goes to temp dir
-# We set a timeout to avoid hanging (e.g., if anthropic API hangs)
-# The anthropic section will likely fail (no API key in test env) — that's OK
+# We set a timeout to avoid hanging (e.g., if OpenRouter API hangs)
+# The OpenRouter section will likely fail (no API key in test env) — that's OK
 if NOVA_DASHBOARD_DIR="$TEMP_OUT" timeout 120 bash "$SCRIPT" > "$TEMP_OUT/run.log" 2>&1; then
     pass "script exited with code 0"
 else
@@ -64,7 +64,7 @@ fi
 echo ""
 echo "[ Output files ]"
 EXPECTED_FILES=(system.json status.json staff.json postgres.json)
-# anthropic.json may not be produced if API credentials are absent — that's tolerable
+# openrouter.json may not be produced if API credentials are absent — that's tolerable
 # but we still check it if it exists
 
 for f in "${EXPECTED_FILES[@]}"; do
@@ -75,11 +75,11 @@ for f in "${EXPECTED_FILES[@]}"; do
     fi
 done
 
-# anthropic.json is optional in test environment (requires 1Password + API key)
-if [ -f "$TEMP_OUT/anthropic.json" ]; then
-    pass "anthropic.json was produced (bonus)"
+# openrouter.json is optional in test environment (requires OPENROUTER_API_KEY)
+if [ -f "$TEMP_OUT/openrouter.json" ]; then
+    pass "openrouter.json was produced (bonus)"
 else
-    skip "anthropic.json not produced (expected in CI — requires 1Password + Admin API key)"
+    skip "openrouter.json not produced (expected in CI — requires OPENROUTER_API_KEY env var)"
 fi
 
 # --- Test 4: Each produced file is valid JSON ---

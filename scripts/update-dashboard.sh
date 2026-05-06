@@ -9,7 +9,7 @@
 #   - update-dashboard-status.sh (status.json)
 #   - update-staff-dashboard.sh  (staff.json)
 #   - dashboard-postgres.sh      (postgres.json)
-#   - update-anthropic-dashboard.sh (anthropic.json)
+#   - update-anthropic-dashboard.sh (openrouter.json, formerly anthropic.json)
 #
 # USAGE:
 #   NOVA_DASHBOARD_DIR=/path/to/output ./scripts/update-dashboard.sh
@@ -17,11 +17,11 @@
 # CRON SETUP (single entry — runs every 5 min):
 #   */5 * * * * /path/to/scripts/update-dashboard.sh >> /var/log/dashboard-cron.log 2>&1
 #
-# The Anthropic section self-throttles to 15-minute intervals.
+# The OpenRouter section self-throttles to 15-minute intervals.
 # Each section is isolated in a subshell; a failure in one leaves the others unaffected.
 #
 # REQUIREMENTS: jq, psql, curl, openclaw (for system section)
-#               op (1Password CLI, for anthropic section only)
+#               OPENROUTER_API_KEY env var (for openrouter section)
 # =============================================================================
 
 set -e  # Exit on error at script level; individual sections trap their own errors
@@ -505,24 +505,23 @@ EOF
 }
 
 # ====================
-# Section: Anthropic API Costs
+# Section: OpenRouter API Costs
 # ====================
-# Outputs: anthropic.json
+# Outputs: openrouter.json (and anthropic.json as a back-compat symlink)
 # Data sources:
-#   - Anthropic Admin API: /v1/organizations/cost_report (paginated)
-#   - Anthropic Admin API: /v1/organizations/usage_report/messages (paginated)
-#   - 1Password CLI for Admin API key retrieval
+#   - OpenRouter: GET /api/v1/credits     (total_credits, total_usage)
+#   - Local snapshot log: logs/openrouter-snapshots.jsonl
+#         Each update appends {timestamp, total_usage, total_credits}.
+#         Daily/monthly deltas are derived from this log.
 #   - session-activity.jsonl for active-time cost-per-hour calculation
-# Throttle: skips update if anthropic.json is < 15 minutes old
-# Previously: update-anthropic-dashboard.sh
+# Throttle: skips update if openrouter.json is < 15 minutes old
 # ====================
-update_anthropic() {
-    local out_file="${OUTPUT_DIR}/anthropic.json"
+update_openrouter() {
+    local out_file="${OUTPUT_DIR}/openrouter.json"
+    local compat_file="${OUTPUT_DIR}/anthropic.json"
     local tmp_file="${out_file}.tmp"
 
-    # --- Throttle: skip the expensive API calls if data is fresh enough ---
-    # The Anthropic cost_report API has a ~15-minute reporting lag anyway,
-    # so updating more frequently would return identical data.
+    # --- Throttle: avoid hammering the OpenRouter API ---
     if [ -f "$out_file" ]; then
         local last_updated
         last_updated=$(jq -r '.updated // empty' "$out_file" 2>/dev/null || true)
@@ -532,237 +531,176 @@ update_anthropic() {
             now_epoch=$(date +%s)
             age_minutes=$(( (now_epoch - last_epoch) / 60 ))
             if [ "$age_minutes" -lt 15 ]; then
-                echo "anthropic.json is only ${age_minutes}min old — skipping (throttle: 15min)" 
+                echo "openrouter.json is only ${age_minutes}min old — skipping (throttle: 15min)"
                 return 0
             fi
         fi
     fi
 
-    # --- Anthropic section runs with its own error handling ---
-    # We run this in a subshell so errors don't kill the main script
     (
     set -euo pipefail
 
-    # Paths (derive from HOME for portability)
-    local log_file="${HOME}/.openclaw/workspace/logs/anthropic-stats.log"
-    local spend_log="${HOME}/.openclaw/workspace/logs/anthropic-spend.jsonl"
+    local log_file="${HOME}/.openclaw/workspace/logs/openrouter-stats.log"
+    local spend_log="${HOME}/.openclaw/workspace/logs/openrouter-spend.jsonl"
+    local snapshot_log="${HOME}/.openclaw/workspace/logs/openrouter-snapshots.jsonl"
 
     mkdir -p "$(dirname "$log_file")"
     mkdir -p "$(dirname "$out_file")"
     mkdir -p "$(dirname "$spend_log")"
+    mkdir -p "$(dirname "$snapshot_log")"
 
     _log() { echo "$(date -Iseconds) - $1" | tee -a "$log_file"; }
     _error_exit() { _log "ERROR: $1"; exit 1; }
 
-    _log "Starting Anthropic dashboard update"
+    _log "Starting OpenRouter dashboard update"
 
-    # Get admin key from 1Password
-    if ! eval "$(gpg --decrypt ~/.secrets/1password-master.gpg 2>/dev/null | op signin --account family 2>&1)"; then
-        _error_exit "Failed to sign in to 1Password"
+    if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+        _error_exit "OPENROUTER_API_KEY is not set in the environment"
     fi
 
-    local admin_key
-    admin_key=$(op item get "Anthropic API" --vault "NOVA Shared Vault" --fields "Admin API Key" --reveal 2>/dev/null)
-    if [ -z "$admin_key" ]; then
-        _error_exit "Failed to retrieve Anthropic Admin API key from 1Password"
+    # --- Fetch /credits ---
+    local credits_response total_usage total_credits
+    credits_response=$(curl -sfS --max-time 20 \
+        -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+        https://openrouter.ai/api/v1/credits) || \
+        _error_exit "Failed to call /api/v1/credits"
+
+    if ! echo "$credits_response" | jq empty 2>/dev/null; then
+        _error_exit "Invalid JSON from /api/v1/credits"
     fi
 
-    local current_month first_of_month end_date
-    current_month=$(date +%Y-%m)
+    total_usage=$(echo "$credits_response" | jq -r '.data.total_usage // 0')
+    total_credits=$(echo "$credits_response" | jq -r '.data.total_credits // 0')
+
+    if [ -z "$total_usage" ] || [ "$total_usage" = "null" ]; then
+        _error_exit "No total_usage in /credits response"
+    fi
+
+    # --- Append snapshot ---
+    local now_iso
+    now_iso=$(date -Iseconds)
+    echo "{\"timestamp\":\"${now_iso}\",\"total_usage\":${total_usage},\"total_credits\":${total_credits}}" \
+        >> "$snapshot_log"
+
+    # --- Derive daily + MTD from snapshot log ---
+    # For each UTC day, take the first (earliest) snapshot as that day's starting usage.
+    # A day's cost = next_day_first_total_usage - this_day_first_total_usage.
+    # The current day's cost = current total_usage - today's first snapshot.
+    local current_month first_of_month end_date today
+    current_month=$(date -u +%Y-%m)
     first_of_month="${current_month}-01"
-    end_date=$(date +%Y-%m-%d)
+    end_date=$(date -u +%Y-%m-%d)
+    today="$end_date"
 
-    # Helper: paginated API fetch
-    # Args: $1 = URL, $2 = description
-    _fetch_paginated() {
-        local url="$1"
-        local description="$2"
-        local all_data="[]"
-        local page_count=0
-        local next_page=""
+    # Extract daily-first snapshots for the current month using jq.
+    # Output: [{date, first_total_usage}] sorted ascending by date.
+    local daily_firsts
+    daily_firsts=$(jq -sc --arg month "$current_month" '
+        [ .[]
+          | select(.timestamp | startswith($month))
+          | {date: (.timestamp | split("T")[0]), ts: .timestamp, total_usage: .total_usage}
+        ]
+        | group_by(.date)
+        | map(min_by(.ts))
+        | sort_by(.date)
+        | map({date: .date, first_total_usage: .total_usage})
+    ' "$snapshot_log" 2>/dev/null || echo "[]")
 
-        _log "Fetching ${description} (with pagination)..."
-
-        while true; do
-            page_count=$((page_count + 1))
-            local fetch_url="$url"
-            if [ -n "$next_page" ] && [ "$next_page" != "null" ]; then
-                if [[ "$fetch_url" == *"?"* ]]; then
-                    fetch_url="${fetch_url}&next_page=${next_page}"
-                else
-                    fetch_url="${fetch_url}?next_page=${next_page}"
-                fi
-            fi
-
-            _log "  Fetching page ${page_count}..."
-            local response
-            response=$(curl -sf "$fetch_url" \
-                --header "anthropic-version: 2023-06-01" \
-                --header "x-api-key: $admin_key") || {
-                _error_exit "Failed to fetch ${description} (page ${page_count})"
-            }
-
-            if ! echo "$response" | jq empty 2>/dev/null; then
-                _error_exit "Invalid JSON response for ${description} (page ${page_count})"
-            fi
-
-            local page_data
-            page_data=$(echo "$response" | jq -c '.data // []')
-
-            if [ "$page_data" = "[]" ] || [ "$page_data" = "null" ]; then
-                if [ "$page_count" -eq 1 ]; then
-                    _log "  Empty response for ${description}"
-                    echo '{"data": []}'
-                    return 0
-                fi
-            else
-                all_data=$(jq -n --argjson all "$all_data" --argjson page "$page_data" '$all + $page')
-            fi
-
-            local has_more
-            has_more=$(echo "$response" | jq -r '.has_more // false')
-            next_page=$(echo "$response" | jq -r '.next_page // null')
-
-            if [ "$has_more" != "true" ]; then
-                _log "  Completed fetching ${description} (${page_count} pages)"
-                break
-            fi
-
-            if [ -z "$next_page" ] || [ "$next_page" = "null" ]; then
-                _log "  Warning: has_more=true but no next_page token for ${description}"
-                break
-            fi
-
-            if [ "$page_count" -gt 100 ]; then
-                _error_exit "Pagination exceeded 100 pages for ${description} - possible infinite loop"
-            fi
-        done
-
-        echo "{\"data\": $all_data}"
-    }
-
-    # Fetch data
-    local current_month_url all_time_url usage_url
-    current_month_url="https://api.anthropic.com/v1/organizations/cost_report?starting_at=${first_of_month}T00:00:00Z&ending_at=${end_date}T23:59:59Z"
-    all_time_url="https://api.anthropic.com/v1/organizations/cost_report?starting_at=2026-01-30T00:00:00Z&ending_at=${end_date}T23:59:59Z"
-    usage_url="https://api.anthropic.com/v1/organizations/usage_report/messages?starting_at=2026-01-30T00:00:00Z&ending_at=${end_date}T23:59:59Z&bucket_width=1d"
-
-    local api_response all_time_response usage_response
-    api_response=$(_fetch_paginated "$current_month_url" "current month cost data")
-    all_time_response=$(_fetch_paginated "$all_time_url" "all-time cost data")
-    usage_response=$(_fetch_paginated "$usage_url" "usage data")
-
-    # Parse and calculate
-    local month_spend
-    month_spend=$(echo "$api_response" | jq --arg month "$current_month" '
-      [.data[]? | select(.starting_at | startswith($month)) | .results[]?.amount // 0 | tonumber] | add // 0 | . / 100 | . * 100 | round / 100
-    ') || _error_exit "Failed to parse current month spend"
-
-    local all_time_spend
-    all_time_spend=$(echo "$all_time_response" | jq '
-      [.data[]?.results[]?.amount // 0 | tonumber] | add // 0 | . / 100 | . * 100 | round / 100
-    ') || _error_exit "Failed to parse all-time spend"
-
-    local all_time_input all_time_output all_time_cache_read all_time_total_input
-    all_time_input=$(echo "$usage_response" | jq '[.data[]?.results[]? | (.uncached_input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation.ephemeral_5m_input_tokens // 0) + (.cache_creation.ephemeral_1h_input_tokens // 0)] | add // 0')
-    all_time_output=$(echo "$usage_response" | jq '[.data[]?.results[]?.output_tokens // 0] | add // 0')
-    all_time_cache_read=$(echo "$usage_response" | jq '[.data[]?.results[]?.cache_read_input_tokens // 0] | add // 0')
-    all_time_total_input=$(echo "$usage_response" | jq '[.data[]?.results[]? | (.uncached_input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation.ephemeral_5m_input_tokens // 0)] | add // 0')
-
-    local all_time_cache_rate="null"
-    if [ "$all_time_total_input" -gt 0 ]; then
-        all_time_cache_rate=$(echo "$all_time_cache_read $all_time_total_input" | awk '{printf "%.1f", ($1/$2)*100}')
+    if [ -z "$daily_firsts" ] || [ "$daily_firsts" = "null" ]; then
+        daily_firsts="[]"
     fi
 
+    # Build daily cost series: per-day cost = next_day.first - this_day.first,
+    # except current day which is (current total_usage - today's first snapshot).
     local daily_data
-    daily_data=$(echo "$api_response" | jq --arg month "$current_month" '
-      [.data[]? | select(.starting_at | startswith($month)) | {
-        date: (.starting_at | split("T")[0]),
-        cost: (([.results[]?.amount // 0 | tonumber] | add // 0) / 100 | . * 100 | round / 100)
-      }] | map(select(.cost > 0))
-    ')
+    daily_data=$(jq -c --argjson current "$total_usage" --arg today "$today" '
+        . as $arr
+        | [range(0; length) as $i
+           | $arr[$i] as $d
+           | (if $i + 1 < ($arr|length) then $arr[$i+1].first_total_usage
+              else $current end) as $next_first
+           | {date: $d.date, cost: (($next_first - $d.first_total_usage) * 100 | round / 100)}
+          ]
+        | map(select(.cost > 0.005 or .date == $today))
+    ' <<<"$daily_firsts")
 
-    local days_elapsed avg_daily days_in_month projected
+    if [ -z "$daily_data" ] || [ "$daily_data" = "null" ]; then
+        daily_data="[]"
+    fi
+
+    # MTD spend = current total_usage - first snapshot of the month's first_total_usage.
+    # If we have no prior snapshots this month, MTD = 0 for this invocation
+    # (the next run will see a delta).
+    local month_start_usage month_spend
+    month_start_usage=$(echo "$daily_firsts" | jq -r '.[0].first_total_usage // empty')
+    if [ -z "$month_start_usage" ]; then
+        month_spend="0.00"
+    else
+        month_spend=$(awk -v c="$total_usage" -v s="$month_start_usage" 'BEGIN{printf "%.2f", c-s}')
+    fi
+
+    # days_elapsed: number of distinct UTC days covered by daily_data (at least 1)
+    local days_elapsed days_in_month avg_daily projected
     days_elapsed=$(echo "$daily_data" | jq 'length')
-    avg_daily=$(echo "$month_spend $days_elapsed" | awk '{if($2>0) printf "%.2f", $1/$2; else print 0}')
-    days_in_month=$(date -d "${current_month}-01 +1 month -1 day" +%d)
-    projected=$(echo "$avg_daily $days_in_month" | awk '{printf "%.0f", $1*$2}')
+    if [ "$days_elapsed" -lt 1 ]; then
+        days_elapsed=1
+    fi
+    days_in_month=$(date -u -d "${first_of_month} +1 month -1 day" +%d)
+    avg_daily=$(awk -v m="$month_spend" -v d="$days_elapsed" 'BEGIN{if(d>0)printf "%.2f", m/d; else print 0}')
+    projected=$(awk -v a="$avg_daily" -v d="$days_in_month" 'BEGIN{printf "%.0f", a*d}')
 
+    local limit=5000
     local over_limit="false"
     local alert_msg=""
-    if (( $(echo "$projected > 5000" | bc -l) )); then
+    if awk -v p="$projected" -v L="$limit" 'BEGIN{exit !(p>L)}'; then
         over_limit="true"
-        alert_msg="Projected monthly spend (~\$$projected) approaches/exceeds \$5,000 limit"
+        alert_msg="Projected monthly spend (~\$${projected}) approaches/exceeds \$${limit} limit"
     fi
 
-    local today_cost latest_date
-    today_cost=$(echo "$daily_data" | jq --arg today "$end_date" '[.[]? | select(.date == $today) | .cost] | add // 0')
-    latest_date="$end_date"
-
-    if [ "$today_cost" = "0" ] || [ "$today_cost" = "null" ]; then
-        latest_date=$(echo "$daily_data" | jq -r 'sort_by(.date) | last | .date // empty')
-        if [ -n "$latest_date" ]; then
-            today_cost=$(echo "$daily_data" | jq --arg d "$latest_date" '[.[]? | select(.date == $d) | .cost] | add // 0')
-        else
-            latest_date="$end_date"
-            today_cost="0"
-        fi
-    fi
-    today_cost="${today_cost:-0}"
-
-    local latest_day_usage latest_input_raw latest_output_raw latest_cache_read latest_total_input
-    latest_day_usage=$(echo "$usage_response" | jq --arg d "$latest_date" '[.data[]? | select(.starting_at | startswith($d)) | .results[0]] | first // {}')
-    latest_input_raw=$(echo "$latest_day_usage" | jq '(.uncached_input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation.ephemeral_5m_input_tokens // 0)')
-    latest_output_raw=$(echo "$latest_day_usage" | jq '.output_tokens // 0')
-    latest_cache_read=$(echo "$latest_day_usage" | jq '.cache_read_input_tokens // 0')
-    latest_total_input=$(echo "$latest_day_usage" | jq '(.uncached_input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation.ephemeral_5m_input_tokens // 0)')
-
-    local latest_input latest_output
-    if [ -z "$latest_input_raw" ] || [ "$latest_input_raw" = "null" ] || [ "$latest_input_raw" = "0" ]; then
-        latest_input="null"
-    else
-        latest_input="$latest_input_raw"
+    # Yesterday / latest-day cost
+    local latest_date latest_cost
+    latest_date=$(echo "$daily_data" | jq -r 'sort_by(.date) | last.date // empty')
+    latest_cost=$(echo "$daily_data" | jq -r --arg d "$latest_date" '[.[]|select(.date==$d)|.cost]|add // 0')
+    if [ -z "$latest_date" ]; then
+        latest_date="$today"
+        latest_cost="0"
     fi
 
-    if [ -z "$latest_output_raw" ] || [ "$latest_output_raw" = "null" ] || [ "$latest_output_raw" = "0" ]; then
-        latest_output="null"
-    else
-        latest_output="$latest_output_raw"
+    # All-time totals come straight from /credits
+    local all_time_spend
+    all_time_spend=$(awk -v u="$total_usage" 'BEGIN{printf "%.2f", u}')
+    local all_time_since
+    all_time_since=$(jq -s 'min_by(.timestamp).timestamp // empty' "$snapshot_log" 2>/dev/null | tr -d '"' | cut -c1-10)
+    if [ -z "$all_time_since" ] || [ "$all_time_since" = "null" ]; then
+        all_time_since="$today"
     fi
 
-    local latest_cache_rate="null"
-    if [ -n "$latest_total_input" ] && [ "$latest_total_input" != "null" ] && [ "$latest_total_input" != "0" ]; then
-        latest_cache_rate=$(echo "$latest_cache_read $latest_total_input" | awk '{printf "%.1f", ($1/$2)*100}')
-    fi
-
-    local month_hours_elapsed wall_clock_cph="null"
-    month_hours_elapsed=$((days_elapsed * 24))
-    if [ "$month_hours_elapsed" -gt 0 ] && [ "$(echo "$month_spend > 0" | bc -l)" -eq 1 ]; then
-        wall_clock_cph=$(echo "$month_spend $month_hours_elapsed" | awk '{printf "%.2f", $1/$2}')
-    fi
-
-    # Active time from session-activity.jsonl
+    # Cost-per-hour (active + wall clock) using session-activity.jsonl
     local session_activity_log="${HOME}/.openclaw/workspace/logs/session-activity.jsonl"
     local activity_state="${HOME}/.openclaw/workspace/logs/activity-state.json"
-    local active_minutes="null" active_hours="null" working_cph="null"
+    local active_minutes="null" active_hours="null" working_cph="null" wall_clock_cph="null"
+    local month_hours_elapsed
+    month_hours_elapsed=$((days_elapsed * 24))
+
+    if awk -v m="$month_spend" -v h="$month_hours_elapsed" 'BEGIN{exit !(m>0 && h>0)}'; then
+        wall_clock_cph=$(awk -v m="$month_spend" -v h="$month_hours_elapsed" 'BEGIN{printf "%.2f", m/h}')
+    fi
 
     if [ -f "$session_activity_log" ]; then
         local month_active_minutes
-        month_active_minutes=$(cat "$session_activity_log" 2>/dev/null | \
-            grep "\"timestamp\":\"${current_month}" 2>/dev/null | \
+        month_active_minutes=$(grep "\"timestamp\":\"${current_month}" "$session_activity_log" 2>/dev/null | \
             jq -s 'group_by(.timestamp | split("T")[0]) | map(max_by(.activeMinutes) | .activeMinutes) | add // 0' 2>/dev/null) || month_active_minutes="0"
 
         if [ -n "$month_active_minutes" ] && [ "$month_active_minutes" != "null" ] && [ "$month_active_minutes" != "0" ]; then
             active_minutes="$month_active_minutes"
-            active_hours=$(echo "$month_active_minutes" | awk '{printf "%.2f", $1/60}')
-            if [ "$(echo "$active_hours > 0" | bc -l 2>/dev/null || echo 0)" -eq 1 ] && \
-               [ "$(echo "$month_spend > 0" | bc -l 2>/dev/null || echo 0)" -eq 1 ]; then
-                working_cph=$(echo "$month_spend $active_hours" | awk '{printf "%.2f", $1/$2}')
+            active_hours=$(awk -v m="$month_active_minutes" 'BEGIN{printf "%.2f", m/60}')
+            if awk -v ah="$active_hours" -v m="$month_spend" 'BEGIN{exit !(ah>0 && m>0)}'; then
+                working_cph=$(awk -v m="$month_spend" -v h="$active_hours" 'BEGIN{printf "%.2f", m/h}')
             fi
         elif [ -f "$activity_state" ]; then
             active_minutes=$(jq -r '.activeMinutesToday // 0' "$activity_state" 2>/dev/null || echo "null")
             if [ "$active_minutes" != "null" ] && [ "$active_minutes" != "0" ]; then
-                active_hours=$(echo "$active_minutes" | awk '{printf "%.2f", $1/60}')
+                active_hours=$(awk -v m="$active_minutes" 'BEGIN{printf "%.2f", m/60}')
             fi
         fi
     fi
@@ -771,37 +709,39 @@ update_anthropic() {
     cat > "$tmp_file" << EOF
 {
   "updated": "$(date -Iseconds)",
-  "source": "Admin API (automated)",
+  "source": "OpenRouter /credits + local snapshots",
+  "provider": "openrouter",
   "yesterday": {
-    "date": "$latest_date",
-    "costDollars": $today_cost,
-    "inputTokens": $latest_input,
-    "outputTokens": $latest_output,
-    "cacheHitRate": $latest_cache_rate
+    "date": "${latest_date}",
+    "costDollars": ${latest_cost},
+    "inputTokens": null,
+    "outputTokens": null,
+    "cacheHitRate": null
   },
   "currentMonth": {
-    "month": "$current_month",
-    "spend": $month_spend,
-    "limit": 5000,
-    "daysElapsed": $days_elapsed,
-    "avgDailySpend": $avg_daily,
-    "projectedMonthly": $projected,
-    "resetDate": "$(date -d "${current_month}-01 +1 month" +%Y-%m-%d)"
+    "month": "${current_month}",
+    "spend": ${month_spend},
+    "limit": ${limit},
+    "daysElapsed": ${days_elapsed},
+    "avgDailySpend": ${avg_daily},
+    "projectedMonthly": ${projected},
+    "resetDate": "$(date -u -d "${first_of_month} +1 month" +%Y-%m-%d)"
   },
   "allTime": {
-    "since": "2026-01-30",
-    "totalSpend": $all_time_spend,
-    "inputTokens": $all_time_input,
-    "outputTokens": $all_time_output,
-    "cacheHitRate": $all_time_cache_rate
+    "since": "${all_time_since}",
+    "totalSpend": ${all_time_spend},
+    "inputTokens": null,
+    "outputTokens": null,
+    "cacheHitRate": null,
+    "totalCredits": ${total_credits}
   },
-  "daily": $daily_data,
+  "daily": ${daily_data},
   "costPerHour": {
-    "working": $working_cph,
-    "wallClock": $wall_clock_cph,
-    "activeMinutesMonth": $active_minutes,
-    "activeHoursMonth": $active_hours,
-    "wallClockHoursMonth": $month_hours_elapsed,
+    "working": ${working_cph},
+    "wallClock": ${wall_clock_cph},
+    "activeMinutesMonth": ${active_minutes},
+    "activeHoursMonth": ${active_hours},
+    "wallClockHoursMonth": ${month_hours_elapsed},
     "scope": "month",
     "source": "session-activity.jsonl",
     "note": "Monthly average from actual tracked activity"
@@ -813,28 +753,31 @@ update_anthropic() {
     "note": "AWS costs not yet integrated"
   },
   "alerts": {
-    "projectedOverLimit": $over_limit,
-    "message": "$alert_msg"
+    "projectedOverLimit": ${over_limit},
+    "message": "${alert_msg}"
   }
 }
 EOF
 
     if ! jq . "$tmp_file" > /dev/null 2>&1; then
-        _error_exit "Generated invalid JSON for anthropic.json"
+        _error_exit "Generated invalid JSON for openrouter.json"
     fi
 
     mv "$tmp_file" "$out_file"
 
-    echo "{\"timestamp\":\"$(date -Iseconds)\",\"monthSpend\":$month_spend,\"allTimeSpend\":$all_time_spend,\"avgDaily\":$avg_daily,\"projected\":$projected}" >> "$spend_log"
+    # Back-compat: keep anthropic.json in sync until frontend migration is complete.
+    cp "$out_file" "$compat_file"
 
-    _log "Dashboard updated: MTD=\$$month_spend, AllTime=\$$all_time_spend, Projected=\$$projected"
+    echo "{\"timestamp\":\"$(date -Iseconds)\",\"monthSpend\":${month_spend},\"allTimeSpend\":${all_time_spend},\"avgDaily\":${avg_daily},\"projected\":${projected}}" >> "$spend_log"
+
+    _log "Dashboard updated: MTD=\$${month_spend}, AllTime=\$${all_time_spend}, Projected=\$${projected}"
     if [ "$over_limit" = "true" ]; then
         _log "ALERT: $alert_msg"
     fi
-    _log "Anthropic dashboard update completed successfully"
+    _log "OpenRouter dashboard update completed successfully"
 
     ) || {
-        echo "WARN: Anthropic section failed (exit $?) — other sections unaffected" >&2
+        echo "WARN: OpenRouter section failed (exit $?) — other sections unaffected" >&2
     }
 }
 
@@ -844,7 +787,7 @@ EOF
 # Each section is invoked in a subshell ( ... ) so that:
 #   1. set -e errors inside a section don't terminate the entire script
 #   2. A failure in one section is logged as a warning and the rest continue
-# The anthropic section manages its own subshell internally.
+# The openrouter section manages its own subshell internally.
 # ====================
 
 echo "=== Nova Dashboard Update: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
@@ -853,6 +796,6 @@ echo "=== Nova Dashboard Update: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 ( update_status ) || echo "WARN: status.json update failed" >&2
 ( update_staff )  || echo "WARN: staff.json update failed" >&2
 ( update_postgres ) || echo "WARN: postgres.json update failed" >&2
-update_anthropic   # already handles its own errors internally
+update_openrouter  # already handles its own errors internally
 
 echo "=== Dashboard update complete ==="
