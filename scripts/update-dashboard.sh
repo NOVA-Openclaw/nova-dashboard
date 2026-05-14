@@ -112,10 +112,10 @@ update_system() {
         if echo "$health_json" | jq empty 2>/dev/null; then
             gateway_status="running"
 
-            # Build channels object from probe data.
+            # Build channels object from health data.
             # openclaw health --json returns:
-            #   { channels: { <name>: { probe: { ok, elapsedMs, bot, team } } } }
-            # We map each channel to: { status, latencyMs?, bot?, team? }
+            #   { channels: { <name>: { connected, running, bot, team } } }
+            # We map each channel to: { status, bot?, team? }
             # Null fields are stripped with_entries(select(.value != null)) for cleaner JSON.
             channels_json=$(echo "$health_json" | jq -c '
                 .channels // {} | to_entries | map({
@@ -123,10 +123,9 @@ update_system() {
                     value: (
                         .value |
                         {
-                            status: (if (.probe.ok // false) then "online" else "offline" end),
-                            latencyMs: (.probe.elapsedMs // null),
-                            bot: (.probe.bot.username // .probe.bot.name // null),
-                            team: (if (.probe.team.name // null) != null then .probe.team.name else null end)
+                            status: (if (.connected // false) then "online" elif (.running // false) then "idle" else "offline" end),
+                            bot: (.bot.username // .bot.name // null),
+                            team: (if (.team.name // null) != null then .team.name else null end)
                         } |
                         # Remove null fields so the JSON stays lean
                         with_entries(select(.value != null))
