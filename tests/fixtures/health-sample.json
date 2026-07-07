@@ -1,0 +1,54 @@
+{
+  "ok": true,
+  "ts": 1783437860428,
+  "durationMs": 99,
+  "channels": {
+    "discord": {
+      "enabled": true,
+      "configured": true,
+      "running": true,
+      "connected": true,
+      "lastError": null,
+      "bot": {
+        "id": "REDACTED",
+        "username": "NOVA"
+      },
+      "team": null
+    },
+    "slack": {
+      "enabled": true,
+      "configured": true,
+      "running": true,
+      "connected": true,
+      "lastError": null
+    },
+    "telegram": {
+      "enabled": true,
+      "configured": true,
+      "running": false,
+      "connected": true,
+      "lastError": null
+    },
+    "signal": {
+      "enabled": true,
+      "configured": true,
+      "running": true,
+      "connected": null,
+      "lastError": null
+    },
+    "agent_chat": {
+      "enabled": true,
+      "configured": true,
+      "running": true,
+      "connected": null,
+      "lastError": null
+    },
+    "offline_channel": {
+      "enabled": true,
+      "configured": true,
+      "running": false,
+      "connected": false,
+      "lastError": "disconnected"
+    }
+  }
+}
