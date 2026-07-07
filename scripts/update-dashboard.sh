@@ -112,21 +112,28 @@ update_system() {
         if echo "$health_json" | jq empty 2>/dev/null; then
             gateway_status="running"
 
-            # Build channels object from probe data.
-            # openclaw health --json returns:
-            #   { channels: { <name>: { probe: { ok, elapsedMs, bot, team } } } }
+            # Build channels object from health data.
+            # openclaw health --json returns (v2026.4+):
+            #   { channels: { <name>: { connected, running, bot: { username }, team: { name } } } }
             # We map each channel to: { status, latencyMs?, bot?, team? }
-            # Null fields are stripped with_entries(select(.value != null)) for cleaner JSON.
+            # Status: connected -> online, running -> idle, otherwise offline.
+            # Legacy .probe.ok is still honored as a fallback.
             channels_json=$(echo "$health_json" | jq -c '
                 .channels // {} | to_entries | map({
                     key: .key,
                     value: (
                         .value |
                         {
-                            status: (if (.probe.ok // false) then "online" else "offline" end),
+                            status: (
+                                if (.connected // false) then "online"
+                                elif (.running // false) then "idle"
+                                elif (.probe.ok // false) then "online"
+                                else "offline"
+                                end
+                            ),
                             latencyMs: (.probe.elapsedMs // null),
-                            bot: (.probe.bot.username // .probe.bot.name // null),
-                            team: (if (.probe.team.name // null) != null then .probe.team.name else null end)
+                            bot: (.bot.username // .bot.name // .probe.bot.username // .probe.bot.name // null),
+                            team: (.team.name // .probe.team.name // null)
                         } |
                         # Remove null fields so the JSON stays lean
                         with_entries(select(.value != null))
