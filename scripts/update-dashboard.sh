@@ -112,21 +112,47 @@ update_system() {
         if echo "$health_json" | jq empty 2>/dev/null; then
             gateway_status="running"
 
-            # Build channels object from probe data.
-            # openclaw health --json returns:
-            #   { channels: { <name>: { probe: { ok, elapsedMs, bot, team } } } }
-            # We map each channel to: { status, latencyMs?, bot?, team? }
-            # Null fields are stripped with_entries(select(.value != null)) for cleaner JSON.
+            # Build channels object from channel status data.
+            # openclaw health --json no longer returns a `.probe.*` block at all
+            # (nova-dashboard#35) — it now reports channel state directly:
+            #   { channels: { <name>: { connected, running, ... } } }
+            # `connected` is present (true/false) for channels with a live
+            # connection concept (discord, slack, telegram). Some channels
+            # (e.g. signal, agent_chat) never populate `connected` even when
+            # fully functional — they only expose `running`. So we use a
+            # 3-tier status ladder instead of a single boolean field:
+            #   connected == true            -> "online"
+            #   connected missing, running   -> "idle"   (functioning, unverified)
+            #   neither                      -> "offline"
+            # This generalizes over whatever channels are configured; no
+            # channel names are hardcoded. See also #27 (agent_chat has no
+            # connection probe at all — "idle" reflects that honestly
+            # instead of mislabeling it "offline"; the DB-probe-based fix
+            # for agent_chat specifically is tracked separately in #27).
+            #
+            # bot/team: the new health format does not currently expose
+            # these fields under any path (verified against live output
+            # 2026-09-12); the mappings below are kept so they populate
+            # automatically if/when upstream reintroduces them, but resolve
+            # to null (stripped) today.
+            #
+            # latencyMs: there is no equivalent to the old `.probe.elapsedMs`
+            # anywhere in the new format (only a `lastProbeAt` timestamp,
+            # which is also null for every channel today) — omitted rather
+            # than inventing or reusing a stale value.
             channels_json=$(echo "$health_json" | jq -c '
                 .channels // {} | to_entries | map({
                     key: .key,
                     value: (
                         .value |
                         {
-                            status: (if (.probe.ok // false) then "online" else "offline" end),
-                            latencyMs: (.probe.elapsedMs // null),
-                            bot: (.probe.bot.username // .probe.bot.name // null),
-                            team: (if (.probe.team.name // null) != null then .probe.team.name else null end)
+                            status: (
+                                if (.connected // false) then "online"
+                                elif (.running // false) then "idle"
+                                else "offline" end
+                            ),
+                            bot: (.bot.username // .bot.name // null),
+                            team: (if (.team.name // null) != null then .team.name else null end)
                         } |
                         # Remove null fields so the JSON stays lean
                         with_entries(select(.value != null))
