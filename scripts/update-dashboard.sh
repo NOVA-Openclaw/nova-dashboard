@@ -52,8 +52,87 @@ fi
 OUTPUT_DIR="${NOVA_DASHBOARD_DIR:-$HOME/www/static/dashboard}"
 mkdir -p "$OUTPUT_DIR"
 
-# Ensure PATH includes common tool locations (cron environment is stripped)
-export PATH="/home/linuxbrew/.linuxbrew/bin:/home/$(whoami)/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# Ensure PATH includes common tool locations (cron environment is stripped).
+#
+# NOTE (#37): linuxbrew is deliberately placed LAST, not first. Its `node` is
+# frequently a version that openclaw's `engines` field rejects (e.g. v25.5.0 on
+# home.renaissancemachine.ai, where openclaw requires >=22.22.3 <23, >=24.15.0 <25,
+# or >=25.9.0). When an unsupported node wins the PATH race, `openclaw health --json`
+# exits non-zero with an engines error on STDERR and prints NOTHING on STDOUT — a
+# silent failure that used to fall through to the pgrep fallback and emit a
+# plausible-looking `channels: {}`. We still keep linuxbrew on PATH because other
+# helpers (jq, gh) may live there, but it must never shadow the system node.
+export PATH="/home/$(whoami)/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
+
+# ====================
+# Helper: resolve_openclaw
+# ====================
+# Resolve an `openclaw` invocation that is guaranteed to run under a node version
+# openclaw actually supports, rather than trusting PATH ordering (#37).
+#
+# Sets the global OPENCLAW_CMD array. Returns 0 on success, 1 if no usable
+# combination could be found (caller must then treat health as UNKNOWN, loudly).
+OPENCLAW_CMD=()
+OPENCLAW_RESOLVE_ERROR=""
+
+resolve_openclaw() {
+    OPENCLAW_CMD=()
+    OPENCLAW_RESOLVE_ERROR=""
+
+    # Allow explicit operator override for unusual installs.
+    if [ -n "${OPENCLAW_BIN:-}" ]; then
+        if [ -x "${OPENCLAW_BIN}" ]; then
+            OPENCLAW_CMD=("${OPENCLAW_BIN}")
+            return 0
+        fi
+        OPENCLAW_RESOLVE_ERROR="OPENCLAW_BIN is set to '${OPENCLAW_BIN}' but it is not executable"
+        return 1
+    fi
+
+    local openclaw_bin
+    if ! openclaw_bin=$(command -v openclaw 2>/dev/null) || [ -z "$openclaw_bin" ]; then
+        OPENCLAW_RESOLVE_ERROR="no 'openclaw' executable found on PATH"
+        return 1
+    fi
+
+    # Probe candidate node interpreters until one satisfies openclaw's engines.
+    # A bare `openclaw` (shebang-resolved node) is tried first so we respect the
+    # install's own expectations when it already works.
+    local -a candidates=("")
+    local n
+    for n in "${NODE_BIN:-}" /usr/bin/node /usr/local/bin/node \
+             "$HOME/.nvm/versions/node/*/bin/node" /home/linuxbrew/.linuxbrew/bin/node; do
+        [ -n "$n" ] || continue
+        # Expand any glob (nvm) and keep only executables.
+        local g
+        for g in $n; do
+            [ -x "$g" ] && candidates+=("$g")
+        done
+    done
+
+    local cand probe_err probe_rc
+    for cand in "${candidates[@]}"; do
+        if [ -z "$cand" ]; then
+            probe_err=$("$openclaw_bin" --version 2>&1 >/dev/null)
+            probe_rc=$?
+        else
+            probe_err=$("$cand" "$openclaw_bin" --version 2>&1 >/dev/null)
+            probe_rc=$?
+        fi
+
+        if [ "$probe_rc" -eq 0 ] && ! printf '%s' "$probe_err" | grep -qi 'is required (current:'; then
+            if [ -z "$cand" ]; then
+                OPENCLAW_CMD=("$openclaw_bin")
+            else
+                OPENCLAW_CMD=("$cand" "$openclaw_bin")
+            fi
+            return 0
+        fi
+    done
+
+    OPENCLAW_RESOLVE_ERROR="found openclaw at '${openclaw_bin}' but no available node satisfies its engines requirement (last error: ${probe_err:-none})"
+    return 1
+}
 
 # ====================
 # Helper: derive_db_name
@@ -98,12 +177,48 @@ update_system() {
     local tmp_file="${out_file}.tmp"
 
     # --- Gateway & channel status ---
-    # Default to stopped/empty until we confirm the gateway responds
+    # Default to stopped/empty until we confirm the gateway responds.
+    #
+    # health_state (#37) distinguishes three genuinely different situations that
+    # used to be collapsed into one plausible-looking `channels: {}`:
+    #   "ok"      -> we successfully parsed health output; channels_json is real
+    #   "unknown" -> the health query FAILED; channels_json is NOT a measurement
+    #   (absent)  -> never set; treated as unknown by consumers
+    # A blanked payload must never be indistinguishable from a genuinely empty one.
     local gateway_status="stopped"
     local channels_json="{}"
+    local health_state="unknown"
+    local health_error=""
 
-    local health_raw
-    if health_raw=$(timeout 15 openclaw health --json --timeout 10000 2>/dev/null); then
+    local health_raw="" health_rc=0 health_stderr=""
+    local health_err_file
+    health_err_file=$(mktemp "${TMPDIR:-/tmp}/nova-dashboard-health.XXXXXX") || health_err_file=""
+
+    if ! resolve_openclaw; then
+        health_rc=127
+        health_error="openclaw unavailable: ${OPENCLAW_RESOLVE_ERROR}"
+    else
+        if [ -n "$health_err_file" ]; then
+            health_raw=$(timeout 15 "${OPENCLAW_CMD[@]}" health --json --timeout 10000 2>"$health_err_file")
+            health_rc=$?
+            health_stderr=$(head -c 500 "$health_err_file" 2>/dev/null)
+        else
+            health_raw=$(timeout 15 "${OPENCLAW_CMD[@]}" health --json --timeout 10000 2>&1)
+            health_rc=$?
+        fi
+
+        if [ "$health_rc" -ne 0 ]; then
+            health_error="'openclaw health --json' exited ${health_rc}"
+        elif [ -z "${health_raw//[[:space:]]/}" ]; then
+            # Exit 0 but empty stdout is still a failure, not an empty gateway.
+            health_rc=1
+            health_error="'openclaw health --json' returned EMPTY output with exit 0"
+        fi
+        [ -n "$health_stderr" ] && health_error="${health_error}; stderr: ${health_stderr}"
+    fi
+    [ -n "$health_err_file" ] && rm -f "$health_err_file"
+
+    if [ "$health_rc" -eq 0 ]; then
         # Strip any non-JSON prefix lines (logging output before the JSON object).
         # The openclaw CLI may emit log lines before the JSON payload; sed discards them.
         local health_json
@@ -111,6 +226,7 @@ update_system() {
 
         if echo "$health_json" | jq empty 2>/dev/null; then
             gateway_status="running"
+            health_state="ok"
 
             # Build channels object from probe data.
             # openclaw health --json returns:
@@ -133,16 +249,28 @@ update_system() {
                     )
                 }) | from_entries
             ' 2>/dev/null || echo "{}")
+        else
+            health_state="unknown"
+            health_error="'openclaw health --json' produced output that is not valid JSON"
         fi
-    else
-        # Fallback when `openclaw health` fails or times out.
-        # Check for the gateway process directly — gives "running" without channel data.
+    fi
+
+    if [ "$health_state" != "ok" ]; then
+        # LOUD failure (#37). Previously this branch silently fell through to a
+        # pgrep check and emitted `channels: {}`, which renders identically to a
+        # healthy gateway with no channels configured. Now we shout, and we mark
+        # the payload as unknown so downstream consumers can tell the difference.
+        echo "ERROR: dashboard health query FAILED — channel data is UNKNOWN, not empty. ${health_error}" >&2
+
+        # We may still report gateway liveness from the process table, but this is
+        # explicitly a liveness hint, NOT a health measurement.
         if pgrep -u "$(whoami)" -f "openclaw-gateway" > /dev/null 2>&1; then
             gateway_status="running"
         else
             gateway_status="stopped"
         fi
-        channels_json="{}"
+        channels_json="null"
+        [ -n "$health_error" ] || health_error="unknown failure querying openclaw health"
     fi
 
     # --- System metrics (read directly from /proc and standard Linux tools) ---
@@ -191,6 +319,8 @@ update_system() {
         --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg gateway "$gateway_status" \
         --argjson channels "$channels_json" \
+        --arg health_state "$health_state" \
+        --arg health_error "$health_error" \
         --arg uptime_human "$uptime_human" \
         --argjson uptime_seconds "$uptime_seconds" \
         --arg load_avg "$load" \
@@ -209,6 +339,12 @@ update_system() {
             updated: $updated,
             gateway: $gateway,
             channels: $channels,
+            # #37: healthState is "ok" when `channels` is a real measurement, and
+            # "unknown" when the health query failed. When it is "unknown",
+            # `channels` is null (NOT {}) so a blanked payload is distinguishable
+            # from a genuinely empty one, and healthError carries the reason.
+            healthState: $health_state,
+            healthError: (if $health_error == "" then null else $health_error end),
             uptime: { seconds: $uptime_seconds, human: $uptime_human },
             load: { avg: $load_avg, load1: $load_1 },
             cpu: { cores: $cpu_cores },
