@@ -20,7 +20,9 @@ nova-dashboard/
 ├── dashboard/
 │   └── index.html          # The dashboard UI (single-file frontend)
 ├── scripts/
-│   └── update-dashboard.sh # Consolidated cron script — updates all JSON data files
+│   ├── update-dashboard.sh # Consolidated cron script — updates all JSON data files
+│   └── lib/
+│       └── node-resolve.sh # Resolves a supported node/openclaw binary explicitly (PATH-ordering guard)
 ├── nginx/
 │   └── reports.conf        # Nginx config for reports endpoint
 ├── server.js               # Express + WebSocket server (serves dashboard/)
@@ -101,6 +103,8 @@ The dashboard reads five JSON files populated by `scripts/update-dashboard.sh`:
 ```json
 {
   "gateway": "running",
+  "healthState": "ok",
+  "healthError": null,
   "channels": {
     "slack":    { "status": "online", "latencyMs": 32, "bot": "mybot", "team": "My Team" },
     "telegram": { "status": "online", "latencyMs": 386, "bot": "@example_bot" },
@@ -119,9 +123,22 @@ The frontend derives a three-tier display from these values:
 
 Data comes from `openclaw health --json`. See `system.example.json` for the full schema.
 
+#### `healthState` / `healthError` — fail-loud health semantics
+
+`healthState` and `healthError` distinguish a real measurement from a failed query, so a blanked payload is never indistinguishable from a genuinely empty one:
+
+| `healthState` | `channels` | `healthError` | Meaning |
+|---------------|------------|----------------|---------|
+| `"ok"` | object (real measurement) | `null` | `openclaw health --json` succeeded and was parsed |
+| `"unknown"` | `null` (never `{}`) | populated with the reason | The health query failed — non-zero exit, empty stdout, or unparseable JSON |
+
+When `healthState` is `"unknown"`, `gateway` may still report `"running"` — that value comes from a `pgrep` liveness check on the `openclaw-gateway` process, **not** from the health query. It is a liveness hint only and must never be treated as confirmation that channel data is accurate. `channels` is explicitly `null` (not `{}`) in this state so consumers can tell "no data" apart from "zero channels configured."
+
 ## The Update Script
 
 `scripts/update-dashboard.sh` is the single consolidated script that replaces five separate scripts previously used. It handles all five data sources in one run, with each section isolated so a failure in one doesn't break the others.
+
+`scripts/update-anthropic-dashboard.sh` is a thin backward-compatible wrapper that execs `update-dashboard.sh --anthropic-only`. It exists so cron entries still pointing at the old filename keep working, while the Anthropic-cost logic has a single source of truth in `update-dashboard.sh`. Use `--sections=comma,list` (e.g. `--sections=system,status`) or `--anthropic-only` to run a subset of sections manually; see `./scripts/update-dashboard.sh --help` for the full option list.
 
 ### What it does
 
@@ -138,8 +155,35 @@ Data comes from `openclaw health --json`. See `system.example.json` for the full
 - `jq` — JSON processing
 - `psql` — PostgreSQL client
 - `curl` — HTTP requests (Anthropic API)
-- `openclaw` — For gateway/channel health check
+- `openclaw` — For gateway/channel health check, plus a Node.js runtime satisfying OpenClaw's `engines` range (`>=22.22.3 <23`, `>=24.15.0 <25`, or `>=25.9.0`)
 - `op` (1Password CLI) — For Anthropic API key retrieval (anthropic section only)
+
+### Node.js / openclaw binary resolution (PATH-ordering guard)
+
+`scripts/lib/node-resolve.sh` explicitly resolves a supported Node.js runtime and the `openclaw` binary before calling `openclaw health --json`. This exists because on hosts where an unsupported Node install (e.g. linuxbrew's node) sits earlier in `PATH` than the system node, `openclaw health --json` would exit with no usable output and no visible error — a plausible-looking but wrong dashboard state (see issues #37/#38).
+
+Resolution order for `resolve_supported_node()`:
+1. `NODE_BIN` environment variable, if set (operator override — must point to an executable satisfying the supported version range)
+2. `node` currently on `PATH`, if its version is supported
+3. Well-known install paths: `/usr/bin/node`, `/usr/local/bin/node`, `/opt/node/bin/node`
+4. `nvm` installs under `$HOME/.nvm/versions/node` (newest version first)
+
+Resolution order for `resolve_openclaw_bin()`:
+1. `OPENCLAW_BIN` environment variable, if set (operator override)
+2. `openclaw` on `PATH`
+3. `$HOME/.npm-global/bin/openclaw`
+
+If no supported node or no `openclaw` binary can be found, `update_system()` aborts the `system.json` update and logs an error — it does **not** fall back to a silently blanked payload.
+
+**Operator overrides:**
+
+```bash
+# Force a specific node interpreter (e.g. for unusual installs or testing)
+export NODE_BIN=/opt/node/bin/node
+
+# Force a specific openclaw executable
+export OPENCLAW_BIN=/custom/path/to/openclaw
+```
 
 ### Configuration
 
