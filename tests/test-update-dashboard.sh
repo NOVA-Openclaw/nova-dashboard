@@ -112,12 +112,32 @@ if [ -f "$SYSTEM_FILE" ]; then
         fail "system.json 'gateway' field missing or invalid (got: '$GATEWAY')"
     fi
 
-    # channels object
-    CHANNELS_TYPE=$(jq -r 'if .channels then .channels | type else "missing" end' "$SYSTEM_FILE" 2>/dev/null)
-    if [ "$CHANNELS_TYPE" = "object" ]; then
-        pass "system.json has 'channels' object"
+    # healthState + healthError (#37 / #39)
+    HEALTH_STATE=$(jq -r '.healthState // empty' "$SYSTEM_FILE" 2>/dev/null)
+    if [ "$HEALTH_STATE" = "ok" ] || [ "$HEALTH_STATE" = "unknown" ]; then
+        pass "system.json has 'healthState' field with value '$HEALTH_STATE'"
     else
-        fail "system.json 'channels' is not an object (got type: '$CHANNELS_TYPE')"
+        fail "system.json 'healthState' missing or invalid (got: '$HEALTH_STATE')"
+    fi
+
+    # channels object (real measurement) or null (query failed)
+    CHANNELS_TYPE=$(jq -r 'if .channels == null then "null" else (.channels | type) end' "$SYSTEM_FILE" 2>/dev/null)
+    if [ "$CHANNELS_TYPE" = "object" ] && [ "$HEALTH_STATE" = "ok" ]; then
+        pass "system.json has 'channels' object when healthState is ok"
+    elif [ "$CHANNELS_TYPE" = "null" ] && [ "$HEALTH_STATE" = "unknown" ]; then
+        pass "system.json has 'channels' null when healthState is unknown"
+    else
+        fail "system.json 'channels' type '$CHANNELS_TYPE' inconsistent with healthState '$HEALTH_STATE'"
+    fi
+
+    # healthError present when state is unknown, null when ok
+    HEALTH_ERROR=$(jq -r '.healthError // empty' "$SYSTEM_FILE" 2>/dev/null)
+    if [ "$HEALTH_STATE" = "ok" ] && [ -z "$HEALTH_ERROR" ]; then
+        pass "system.json healthError is null/empty when healthState is ok"
+    elif [ "$HEALTH_STATE" = "unknown" ] && [ -n "$HEALTH_ERROR" ]; then
+        pass "system.json healthError is populated when healthState is unknown: $HEALTH_ERROR"
+    else
+        fail "system.json healthError '$HEALTH_ERROR' inconsistent with healthState '$HEALTH_STATE'"
     fi
 
     # updated timestamp
@@ -276,7 +296,135 @@ else
     fail "node-resolve.sh library not found at $LIB_FILE"
 fi
 
-# --- Test 10: --anthropic-only runs only the Anthropic section ---
+# --- Test 10: Health query exit 0 with empty stdout is reported as unknown ---
+echo ""
+echo "[ Health exit-0 empty stdout ]"
+EMPTY_HEALTH_OUT="$(mktemp -d)"
+FAKE_OPENCLAW_EMPTY="$EMPTY_HEALTH_OUT/openclaw"
+
+cat > "$FAKE_OPENCLAW_EMPTY" <<'EOF'
+#!/usr/bin/env bash
+# Fake openclaw that exits 0 but prints nothing (the #37 silent-failure case)
+if [[ "$*" == *"health"* ]]; then
+    exit 0
+fi
+exit 1
+EOF
+chmod +x "$FAKE_OPENCLAW_EMPTY"
+
+cat > "$EMPTY_HEALTH_OUT/node" <<'EOF'
+#!/usr/bin/env bash
+# Fake node: supports OpenClaw engine range, delegates to first arg
+if [ "$1" = "--version" ]; then
+    echo "v22.23.2"
+    exit 0
+fi
+exec "$@"
+EOF
+chmod +x "$EMPTY_HEALTH_OUT/node"
+
+NODE_BIN="$EMPTY_HEALTH_OUT/node" \
+    OPENCLAW_BIN="$FAKE_OPENCLAW_EMPTY" \
+    NOVA_DASHBOARD_DIR="$EMPTY_HEALTH_OUT" \
+    timeout 60 bash "$SCRIPT" --sections=system > "$EMPTY_HEALTH_OUT/run.log" 2>&1
+SCRIPT_EXIT=$?
+
+if [ "$SCRIPT_EXIT" -eq 0 ] && [ -f "$EMPTY_HEALTH_OUT/system.json" ] && \
+   jq . "$EMPTY_HEALTH_OUT/system.json" >/dev/null 2>&1; then
+    pass "script exits 0 and produces valid system.json when health returns empty stdout"
+else
+    fail "script did not handle empty health stdout"
+    head -30 "$EMPTY_HEALTH_OUT/run.log"
+fi
+
+HS=$(jq -r '.healthState // empty' "$EMPTY_HEALTH_OUT/system.json" 2>/dev/null)
+HE=$(jq -r '.healthError // empty' "$EMPTY_HEALTH_OUT/system.json" 2>/dev/null)
+CH=$(jq -r 'if .channels == null then "null" else (.channels | type) end' "$EMPTY_HEALTH_OUT/system.json" 2>/dev/null)
+
+if [ "$HS" = "unknown" ]; then
+    pass "healthState is 'unknown' for empty stdout"
+else
+    fail "expected healthState='unknown' for empty stdout, got '$HS'"
+fi
+
+if [ -n "$HE" ] && [[ "$HE" == *"EMPTY output"* ]]; then
+    pass "healthError reports empty output reason"
+else
+    fail "expected healthError mentioning EMPTY output, got '$HE'"
+fi
+
+if [ "$CH" = "null" ]; then
+    pass "channels is null (not {}) for empty stdout failure"
+else
+    fail "expected channels=null for empty stdout failure, got type '$CH'"
+fi
+rm -rf "$EMPTY_HEALTH_OUT"
+
+# --- Test 11: Health query exit 0 with unparseable JSON is reported as unknown ---
+echo ""
+echo "[ Health exit-0 unparseable JSON ]"
+BAD_JSON_OUT="$(mktemp -d)"
+FAKE_OPENCLAW_BAD="$BAD_JSON_OUT/openclaw"
+
+cat > "$FAKE_OPENCLAW_BAD" <<'EOF'
+#!/usr/bin/env bash
+# Fake openclaw that exits 0 but prints output starting with '{' that is not valid JSON
+if [[ "$*" == *"health"* ]]; then
+    echo '{"broken":'
+    exit 0
+fi
+exit 1
+EOF
+chmod +x "$FAKE_OPENCLAW_BAD"
+
+cat > "$BAD_JSON_OUT/node" <<'EOF'
+#!/usr/bin/env bash
+if [ "$1" = "--version" ]; then
+    echo "v22.23.2"
+    exit 0
+fi
+exec "$@"
+EOF
+chmod +x "$BAD_JSON_OUT/node"
+
+NODE_BIN="$BAD_JSON_OUT/node" \
+    OPENCLAW_BIN="$FAKE_OPENCLAW_BAD" \
+    NOVA_DASHBOARD_DIR="$BAD_JSON_OUT" \
+    timeout 60 bash "$SCRIPT" --sections=system > "$BAD_JSON_OUT/run.log" 2>&1
+SCRIPT_EXIT=$?
+
+if [ "$SCRIPT_EXIT" -eq 0 ] && [ -f "$BAD_JSON_OUT/system.json" ] && \
+   jq . "$BAD_JSON_OUT/system.json" >/dev/null 2>&1; then
+    pass "script exits 0 and produces valid system.json when health returns unparseable JSON"
+else
+    fail "script did not handle unparseable health JSON"
+    head -30 "$BAD_JSON_OUT/run.log"
+fi
+
+HS=$(jq -r '.healthState // empty' "$BAD_JSON_OUT/system.json" 2>/dev/null)
+HE=$(jq -r '.healthError // empty' "$BAD_JSON_OUT/system.json" 2>/dev/null)
+CH=$(jq -r 'if .channels == null then "null" else (.channels | type) end' "$BAD_JSON_OUT/system.json" 2>/dev/null)
+
+if [ "$HS" = "unknown" ]; then
+    pass "healthState is 'unknown' for unparseable JSON"
+else
+    fail "expected healthState='unknown' for unparseable JSON, got '$HS'"
+fi
+
+if [ -n "$HE" ] && [[ "$HE" == *"not valid JSON"* ]]; then
+    pass "healthError reports invalid JSON reason"
+else
+    fail "expected healthError mentioning invalid JSON, got '$HE'"
+fi
+
+if [ "$CH" = "null" ]; then
+    pass "channels is null (not {}) for unparseable JSON failure"
+else
+    fail "expected channels=null for unparseable JSON failure, got type '$CH'"
+fi
+rm -rf "$BAD_JSON_OUT"
+
+# --- Test 12: --anthropic-only runs only the Anthropic section ---
 echo ""
 echo "[ --anthropic-only section selection ]"
 ANTH_OUT="$(mktemp -d)"
@@ -302,7 +450,7 @@ else
 fi
 rm -rf "$ANTH_OUT"
 
-# --- Test 11: update-anthropic-dashboard.sh wrapper delegates correctly ---
+# --- Test 13: update-anthropic-dashboard.sh wrapper delegates correctly ---
 echo ""
 echo "[ update-anthropic-dashboard.sh wrapper ]"
 WRAPPER="${REPO_DIR}/scripts/update-anthropic-dashboard.sh"

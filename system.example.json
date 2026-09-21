@@ -1,6 +1,8 @@
 {
   "updated": "2026-01-01T00:00:00Z",
   "gateway": "running",
+  "healthState": "ok",
+  "healthError": null,
   "channels": {
     "telegram": { "status": "online", "latencyMs": 386, "bot": "@example_bot" },
     "slack": { "status": "online", "latencyMs": 32, "bot": "mybot", "team": "My Team" },

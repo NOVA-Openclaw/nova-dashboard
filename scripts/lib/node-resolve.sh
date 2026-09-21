@@ -49,8 +49,22 @@ node_version_supported() {
 # resolve_supported_node prints the path to a Node.js binary whose version is
 # supported by OpenClaw. It checks PATH first, then scans common install paths.
 # Returns 1 if no supported node is found.
+#
+# Operator override: set NODE_BIN to force a specific node interpreter.
 resolve_supported_node() {
     local node_bin candidates v
+
+    # Explicit operator override for unusual installs or testing.
+    if [ -n "${NODE_BIN:-}" ]; then
+        if [ -x "$NODE_BIN" ]; then
+            v=$("$NODE_BIN" --version 2>/dev/null | sed 's/^v//')
+            if node_version_supported "$v"; then
+                echo "$NODE_BIN"
+                return 0
+            fi
+        fi
+        return 1
+    fi
 
     # Try the node currently on PATH first.
     node_bin=$(command -v node 2>/dev/null || true)
@@ -90,7 +104,17 @@ resolve_supported_node() {
 
 # resolve_openclaw_bin prints the path to the openclaw CLI binary.
 # Returns 1 if openclaw cannot be found.
+#
+# Operator override: set OPENCLAW_BIN to force a specific openclaw executable.
 resolve_openclaw_bin() {
+    if [ -n "${OPENCLAW_BIN:-}" ]; then
+        if [ -x "$OPENCLAW_BIN" ]; then
+            echo "$OPENCLAW_BIN"
+            return 0
+        fi
+        return 1
+    fi
+
     local openclaw_bin
     openclaw_bin=$(command -v openclaw 2>/dev/null || true)
     if [ -n "$openclaw_bin" ] && [ -x "$openclaw_bin" ]; then
