@@ -52,8 +52,16 @@ fi
 OUTPUT_DIR="${NOVA_DASHBOARD_DIR:-$HOME/www/static/dashboard}"
 mkdir -p "$OUTPUT_DIR"
 
-# Ensure PATH includes common tool locations (cron environment is stripped)
-export PATH="/home/linuxbrew/.linuxbrew/bin:/home/$(whoami)/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# Ensure PATH includes common tool locations (cron environment is stripped).
+# CRITICAL: system directories must come BEFORE linuxbrew so that the supported
+# system node (e.g. /usr/bin/node v22.x) is chosen over linuxbrew's node
+# (e.g. v25.5.0), which OpenClaw rejects and which silently blanks `openclaw health`.
+PATH="/usr/local/bin:/usr/bin:/bin:/home/$(whoami)/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
+export PATH
+
+# Source shared node/openclaw resolution helpers.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/node-resolve.sh"
 
 # ====================
 # Helper: derive_db_name
@@ -98,12 +106,53 @@ update_system() {
     local tmp_file="${out_file}.tmp"
 
     # --- Gateway & channel status ---
-    # Default to stopped/empty until we confirm the gateway responds
+    # Resolve a supported node runtime and the openclaw binary explicitly.
+    # This guards against PATH-ordering bugs where linuxbrew's unsupported node
+    # shadows the system node and causes `openclaw health` to exit silently.
+    local node_bin openclaw_bin
+    node_bin=$(resolve_supported_node) || {
+        echo "ERROR: system.json update aborted — no supported Node.js runtime found" >&2
+        echo "       OpenClaw requires >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0" >&2
+        return 1
+    }
+    openclaw_bin=$(resolve_openclaw_bin) || {
+        echo "ERROR: system.json update aborted — openclaw binary not found" >&2
+        return 1
+    }
+
+    # Default to stopped/empty until we confirm the gateway responds.
+    #
+    # healthState distinguishes three genuinely different situations that used
+    # to be collapsed into one plausible-looking `channels: {}`:
+    #   "ok"      -> we successfully parsed health output; channels_json is real
+    #   "unknown" -> the health query FAILED; channels_json is NOT a measurement
+    # A blanked payload must never be indistinguishable from a genuinely empty one.
     local gateway_status="stopped"
     local channels_json="{}"
+    local health_state="unknown"
+    local health_error=""
 
-    local health_raw
-    if health_raw=$(timeout 15 openclaw health --json --timeout 10000 2>/dev/null); then
+    local health_raw="" health_rc=0 health_stderr=""
+    local health_err_file
+    health_err_file=$(mktemp "${TMPDIR:-/tmp}/nova-dashboard-health.XXXXXX") || health_err_file=""
+
+    health_raw=$(timeout 15 "$node_bin" "$openclaw_bin" health --json --timeout 10000 2>"${health_err_file:-/dev/null}")
+    health_rc=$?
+    if [ -n "$health_err_file" ] && [ -f "$health_err_file" ]; then
+        health_stderr=$(head -c 500 "$health_err_file" 2>/dev/null)
+        rm -f "$health_err_file"
+    fi
+
+    if [ "$health_rc" -ne 0 ]; then
+        health_error="'openclaw health --json' exited ${health_rc}"
+    elif [ -z "${health_raw//[[:space:]]/}" ]; then
+        # Exit 0 but empty stdout is still a failure, not an empty gateway.
+        health_rc=1
+        health_error="'openclaw health --json' returned EMPTY output with exit 0"
+    fi
+    [ -n "$health_stderr" ] && health_error="${health_error}; stderr: ${health_stderr}"
+
+    if [ "$health_rc" -eq 0 ]; then
         # Strip any non-JSON prefix lines (logging output before the JSON object).
         # The openclaw CLI may emit log lines before the JSON payload; sed discards them.
         local health_json
@@ -111,6 +160,7 @@ update_system() {
 
         if echo "$health_json" | jq empty 2>/dev/null; then
             gateway_status="running"
+            health_state="ok"
 
             # Build channels object from probe data.
             # openclaw health --json returns:
@@ -133,16 +183,28 @@ update_system() {
                     )
                 }) | from_entries
             ' 2>/dev/null || echo "{}")
+        else
+            health_state="unknown"
+            health_error="'openclaw health --json' produced output that is not valid JSON"
         fi
-    else
-        # Fallback when `openclaw health` fails or times out.
-        # Check for the gateway process directly — gives "running" without channel data.
+    fi
+
+    if [ "$health_state" != "ok" ]; then
+        # LOUD failure (#37). Previously this branch silently fell through to a
+        # pgrep check and emitted `channels: {}`, which renders identically to a
+        # healthy gateway with no channels configured. Now we shout, and we mark
+        # the payload as unknown so downstream consumers can tell the difference.
+        echo "ERROR: dashboard health query FAILED — channel data is UNKNOWN, not empty. ${health_error}" >&2
+
+        # We may still report gateway liveness from the process table, but this is
+        # explicitly a liveness hint, NOT a health measurement.
         if pgrep -u "$(whoami)" -f "openclaw-gateway" > /dev/null 2>&1; then
             gateway_status="running"
         else
             gateway_status="stopped"
         fi
-        channels_json="{}"
+        channels_json="null"
+        [ -n "$health_error" ] || health_error="unknown failure querying openclaw health"
     fi
 
     # --- System metrics (read directly from /proc and standard Linux tools) ---
@@ -191,6 +253,8 @@ update_system() {
         --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg gateway "$gateway_status" \
         --argjson channels "$channels_json" \
+        --arg health_state "$health_state" \
+        --arg health_error "$health_error" \
         --arg uptime_human "$uptime_human" \
         --argjson uptime_seconds "$uptime_seconds" \
         --arg load_avg "$load" \
@@ -209,6 +273,12 @@ update_system() {
             updated: $updated,
             gateway: $gateway,
             channels: $channels,
+            # healthState is "ok" when `channels` is a real measurement, and
+            # "unknown" when the health query failed. When it is "unknown",
+            # `channels` is null (NOT {}) so a blanked payload is distinguishable
+            # from a genuinely empty one, and healthError carries the reason.
+            healthState: $health_state,
+            healthError: (if $health_error == "" then null else $health_error end),
             uptime: { seconds: $uptime_seconds, human: $uptime_human },
             load: { avg: $load_avg, load1: $load_1 },
             cpu: { cores: $cpu_cores },
@@ -839,6 +909,64 @@ EOF
 }
 
 # ====================
+# Section selection
+# ====================
+# Defaults to running all sections. Set via --sections=comma,list or the
+# convenience alias --anthropic-only. This lets legacy cron entries continue
+# calling update-anthropic-dashboard.sh while sharing one canonical implementation.
+# ====================
+SECTIONS="${NOVA_DASHBOARD_SECTIONS:-all}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --anthropic-only)
+            SECTIONS="anthropic"
+            shift
+            ;;
+        --sections)
+            SECTIONS="$2"
+            shift 2
+            ;;
+        --sections=*)
+            SECTIONS="${1#--sections=}"
+            shift
+            ;;
+        --help|-h)
+            cat << 'EOF'
+Usage: update-dashboard.sh [OPTIONS]
+
+Populate JSON data files for the Nova Dashboard.
+
+Options:
+  --anthropic-only          Run only the Anthropic cost section
+  --sections=list           Comma-separated list of sections to run
+                            (system,status,staff,postgres,anthropic)
+  --help, -h                Show this help message
+
+Environment:
+  NOVA_DASHBOARD_DIR        Output directory for JSON files
+                            (default: $HOME/www/static/dashboard)
+  NOVA_DASHBOARD_SECTIONS   Default section list when no CLI flag is given
+
+Sections run independently; a failure in one does not stop the others.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "ERROR: Unknown option: $1" >&2
+            echo "Run '$0 --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+section_enabled() {
+    local section="$1"
+    [ "$SECTIONS" = "all" ] && return 0
+    [[ ",$SECTIONS," == *",$section,"* ]]
+}
+
+# ====================
 # Main: Run all sections
 # ====================
 # Each section is invoked in a subshell ( ... ) so that:
@@ -848,11 +976,22 @@ EOF
 # ====================
 
 echo "=== Nova Dashboard Update: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+echo "Sections: $SECTIONS"
 
-( update_system ) || echo "WARN: system.json update failed" >&2
-( update_status ) || echo "WARN: status.json update failed" >&2
-( update_staff )  || echo "WARN: staff.json update failed" >&2
-( update_postgres ) || echo "WARN: postgres.json update failed" >&2
-update_anthropic   # already handles its own errors internally
+if section_enabled system; then
+    ( update_system ) || echo "WARN: system.json update failed" >&2
+fi
+if section_enabled status; then
+    ( update_status ) || echo "WARN: status.json update failed" >&2
+fi
+if section_enabled staff; then
+    ( update_staff )  || echo "WARN: staff.json update failed" >&2
+fi
+if section_enabled postgres; then
+    ( update_postgres ) || echo "WARN: postgres.json update failed" >&2
+fi
+if section_enabled anthropic; then
+    update_anthropic   # already handles its own errors internally
+fi
 
 echo "=== Dashboard update complete ==="
