@@ -52,8 +52,16 @@ fi
 OUTPUT_DIR="${NOVA_DASHBOARD_DIR:-$HOME/www/static/dashboard}"
 mkdir -p "$OUTPUT_DIR"
 
-# Ensure PATH includes common tool locations (cron environment is stripped)
-export PATH="/home/linuxbrew/.linuxbrew/bin:/home/$(whoami)/.npm-global/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+# Ensure PATH includes common tool locations (cron environment is stripped).
+# CRITICAL: system directories must come BEFORE linuxbrew so that the supported
+# system node (e.g. /usr/bin/node v22.x) is chosen over linuxbrew's node
+# (e.g. v25.5.0), which OpenClaw rejects and which silently blanks `openclaw health`.
+PATH="/usr/local/bin:/usr/bin:/bin:/home/$(whoami)/.npm-global/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
+export PATH
+
+# Source shared node/openclaw resolution helpers.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/node-resolve.sh"
 
 # ====================
 # Helper: derive_db_name
@@ -98,12 +106,26 @@ update_system() {
     local tmp_file="${out_file}.tmp"
 
     # --- Gateway & channel status ---
+    # Resolve a supported node runtime and the openclaw binary explicitly.
+    # This guards against PATH-ordering bugs where linuxbrew's unsupported node
+    # shadows the system node and causes `openclaw health` to exit silently.
+    local node_bin openclaw_bin
+    node_bin=$(resolve_supported_node) || {
+        echo "ERROR: system.json update aborted — no supported Node.js runtime found" >&2
+        echo "       OpenClaw requires >=22.22.3 <23, >=24.15.0 <25, or >=25.9.0" >&2
+        return 1
+    }
+    openclaw_bin=$(resolve_openclaw_bin) || {
+        echo "ERROR: system.json update aborted — openclaw binary not found" >&2
+        return 1
+    }
+
     # Default to stopped/empty until we confirm the gateway responds
     local gateway_status="stopped"
     local channels_json="{}"
 
     local health_raw
-    if health_raw=$(timeout 15 openclaw health --json --timeout 10000 2>/dev/null); then
+    if health_raw=$(timeout 15 "$node_bin" "$openclaw_bin" health --json --timeout 10000 2>/dev/null); then
         # Strip any non-JSON prefix lines (logging output before the JSON object).
         # The openclaw CLI may emit log lines before the JSON payload; sed discards them.
         local health_json
@@ -839,6 +861,64 @@ EOF
 }
 
 # ====================
+# Section selection
+# ====================
+# Defaults to running all sections. Set via --sections=comma,list or the
+# convenience alias --anthropic-only. This lets legacy cron entries continue
+# calling update-anthropic-dashboard.sh while sharing one canonical implementation.
+# ====================
+SECTIONS="${NOVA_DASHBOARD_SECTIONS:-all}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --anthropic-only)
+            SECTIONS="anthropic"
+            shift
+            ;;
+        --sections)
+            SECTIONS="$2"
+            shift 2
+            ;;
+        --sections=*)
+            SECTIONS="${1#--sections=}"
+            shift
+            ;;
+        --help|-h)
+            cat << 'EOF'
+Usage: update-dashboard.sh [OPTIONS]
+
+Populate JSON data files for the Nova Dashboard.
+
+Options:
+  --anthropic-only          Run only the Anthropic cost section
+  --sections=list           Comma-separated list of sections to run
+                            (system,status,staff,postgres,anthropic)
+  --help, -h                Show this help message
+
+Environment:
+  NOVA_DASHBOARD_DIR        Output directory for JSON files
+                            (default: $HOME/www/static/dashboard)
+  NOVA_DASHBOARD_SECTIONS   Default section list when no CLI flag is given
+
+Sections run independently; a failure in one does not stop the others.
+EOF
+            exit 0
+            ;;
+        *)
+            echo "ERROR: Unknown option: $1" >&2
+            echo "Run '$0 --help' for usage." >&2
+            exit 1
+            ;;
+    esac
+done
+
+section_enabled() {
+    local section="$1"
+    [ "$SECTIONS" = "all" ] && return 0
+    [[ ",$SECTIONS," == *",$section,"* ]]
+}
+
+# ====================
 # Main: Run all sections
 # ====================
 # Each section is invoked in a subshell ( ... ) so that:
@@ -848,11 +928,22 @@ EOF
 # ====================
 
 echo "=== Nova Dashboard Update: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+echo "Sections: $SECTIONS"
 
-( update_system ) || echo "WARN: system.json update failed" >&2
-( update_status ) || echo "WARN: status.json update failed" >&2
-( update_staff )  || echo "WARN: staff.json update failed" >&2
-( update_postgres ) || echo "WARN: postgres.json update failed" >&2
-update_anthropic   # already handles its own errors internally
+if section_enabled system; then
+    ( update_system ) || echo "WARN: system.json update failed" >&2
+fi
+if section_enabled status; then
+    ( update_status ) || echo "WARN: status.json update failed" >&2
+fi
+if section_enabled staff; then
+    ( update_staff )  || echo "WARN: staff.json update failed" >&2
+fi
+if section_enabled postgres; then
+    ( update_postgres ) || echo "WARN: postgres.json update failed" >&2
+fi
+if section_enabled anthropic; then
+    update_anthropic   # already handles its own errors internally
+fi
 
 echo "=== Dashboard update complete ==="

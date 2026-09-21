@@ -11,7 +11,8 @@ SCRIPT="${REPO_DIR}/scripts/update-dashboard.sh"
 
 # Use a temp output directory so we don't clobber production
 TEMP_OUT="$(mktemp -d)"
-trap 'rm -rf "$TEMP_OUT"' EXIT
+FAKE_NODE_DIR=""
+trap 'rm -rf "$TEMP_OUT" "$FAKE_NODE_DIR"' EXIT
 
 PASS=0
 FAIL=0
@@ -163,6 +164,163 @@ LOCK_FILE="/tmp/nova-dashboard-update-$(whoami).lock"
         fail "concurrent execution returned exit $FLOCK_EXIT (expected 0)"
     fi
 ) 9>"$LOCK_FILE"
+
+# --- Test 8: PATH ordering does not let unsupported node blank openclaw health ---
+echo ""
+echo "[ PATH ordering / node guard ]"
+FAKE_NODE_DIR="$(mktemp -d)"
+
+cat > "$FAKE_NODE_DIR/node" <<'EOF'
+#!/usr/bin/env bash
+# Fake unsupported node (matches linuxbrew v25.5.0 that OpenClaw rejects)
+echo "v25.5.0"
+EOF
+chmod +x "$FAKE_NODE_DIR/node"
+
+# Verify the fake node reports the unsupported version
+if [ "$("$FAKE_NODE_DIR/node" --version)" = "v25.5.0" ]; then
+    pass "fake unsupported node created"
+else
+    fail "fake unsupported node not created correctly"
+fi
+
+# Find a real supported node on this host (system paths are safe because we
+# reorder PATH in the script, but we need one to exist for the guard to succeed).
+REAL_NODE=""
+for candidate in /usr/bin/node /usr/local/bin/node /opt/node/bin/node; do
+    if [ -x "$candidate" ]; then
+        v=$("$candidate" --version 2>/dev/null | sed 's/^v//')
+        if printf '%s\n%s\n' "22.22.3" "$v" | sort -V -C; then
+            REAL_NODE="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -n "$REAL_NODE" ]; then
+    NODE_TEST_OUT="$(mktemp -d)"
+    # Put the fake node first in PATH, as linuxbrew would be. The script should
+    # still produce a valid system.json because it resolves the supported node
+    # explicitly rather than trusting PATH order.
+    PATH="$FAKE_NODE_DIR:/usr/bin:/bin:/usr/local/bin:/home/nova/.npm-global/bin" \
+        NOVA_DASHBOARD_DIR="$NODE_TEST_OUT" \
+        timeout 60 bash "$SCRIPT" --sections=system > "$NODE_TEST_OUT/run.log" 2>&1
+    SCRIPT_EXIT=$?
+
+    if [ "$SCRIPT_EXIT" -eq 0 ] && [ -f "$NODE_TEST_OUT/system.json" ] && \
+       jq . "$NODE_TEST_OUT/system.json" >/dev/null 2>&1; then
+        pass "script resolves supported node even when unsupported node is first in PATH"
+    else
+        fail "script did not resolve supported node with bad PATH first"
+        echo "    --- log ---"
+        head -30 "$NODE_TEST_OUT/run.log"
+        echo "    --- end ---"
+    fi
+    rm -rf "$NODE_TEST_OUT"
+else
+    skip "PATH-ordering test (no supported system node found)"
+fi
+
+# --- Test 9: node-resolve.sh helpers ---
+echo ""
+echo "[ node-resolve.sh helpers ]"
+
+LIB_FILE="${REPO_DIR}/scripts/lib/node-resolve.sh"
+if [ -f "$LIB_FILE" ]; then
+    # Unit-test the version predicate directly.
+    (
+        # shellcheck source=scripts/lib/node-resolve.sh
+        source "$LIB_FILE"
+
+        FAILED=0
+        check_version() {
+            local version="$1" expected="$2"
+            if node_version_supported "$version"; then
+                [ "$expected" = "ok" ] || { echo "  unexpected pass for $version"; FAILED=$((FAILED+1)); }
+            else
+                [ "$expected" = "fail" ] || { echo "  unexpected fail for $version"; FAILED=$((FAILED+1)); }
+            fi
+        }
+
+        check_version "22.22.3"   "ok"
+        check_version "22.23.2"   "ok"
+        check_version "22.22.2"   "fail"
+        check_version "23.0.0"    "fail"
+        check_version "24.15.0"   "ok"
+        check_version "24.14.9"   "fail"
+        check_version "25.9.0"    "ok"
+        check_version "25.8.0"    "fail"
+        check_version "26.0.0"    "ok"
+
+        exit "$FAILED"
+    )
+    LIB_TEST_EXIT=$?
+    if [ "$LIB_TEST_EXIT" -eq 0 ]; then
+        pass "node_version_supported accepts/rejects expected versions"
+    else
+        fail "node_version_supported returned unexpected results for $LIB_TEST_EXIT version(s)"
+    fi
+
+    # Verify the resolver can find a supported node on this host.
+    RESOLVED_NODE=$(
+        # shellcheck source=scripts/lib/node-resolve.sh
+        source "$LIB_FILE" >/dev/null 2>&1
+        resolve_supported_node
+    )
+    if [ -n "$RESOLVED_NODE" ] && [ -x "$RESOLVED_NODE" ]; then
+        pass "resolve_supported_node finds executable node ($RESOLVED_NODE)"
+    else
+        fail "resolve_supported_node did not return an executable node"
+    fi
+else
+    fail "node-resolve.sh library not found at $LIB_FILE"
+fi
+
+# --- Test 10: --anthropic-only runs only the Anthropic section ---
+echo ""
+echo "[ --anthropic-only section selection ]"
+ANTH_OUT="$(mktemp -d)"
+NOVA_DASHBOARD_DIR="$ANTH_OUT" timeout 60 bash "$SCRIPT" --anthropic-only > "$ANTH_OUT/run.log" 2>&1 || true
+
+# system.json, status.json, staff.json, postgres.json must NOT be produced
+UNWANTED_FILES=0
+for f in system.json status.json staff.json postgres.json; do
+    if [ -f "$ANTH_OUT/$f" ]; then
+        UNWANTED_FILES=$((UNWANTED_FILES + 1))
+        fail "--anthropic-only produced $f (should only run anthropic section)"
+    fi
+done
+if [ "$UNWANTED_FILES" -eq 0 ]; then
+    pass "--anthropic-only did not produce non-anthropic files"
+fi
+
+# The log should mention the anthropic section
+if grep -qE "anthropic|Anthropic|Sections: .*anthropic" "$ANTH_OUT/run.log"; then
+    pass "--anthropic-only log mentions anthropic section"
+else
+    fail "--anthropic-only log did not mention anthropic section"
+fi
+rm -rf "$ANTH_OUT"
+
+# --- Test 11: update-anthropic-dashboard.sh wrapper delegates correctly ---
+echo ""
+echo "[ update-anthropic-dashboard.sh wrapper ]"
+WRAPPER="${REPO_DIR}/scripts/update-anthropic-dashboard.sh"
+if [ -x "$WRAPPER" ]; then
+    WRAPPER_OUT="$(mktemp -d)"
+    NOVA_DASHBOARD_DIR="$WRAPPER_OUT" timeout 60 bash "$WRAPPER" > "$WRAPPER_OUT/run.log" 2>&1 || true
+    if grep -qE "Sections: .*anthropic|--anthropic-only" "$WRAPPER_OUT/run.log"; then
+        pass "update-anthropic-dashboard.sh delegates to --anthropic-only"
+    else
+        fail "update-anthropic-dashboard.sh did not delegate to --anthropic-only"
+        echo "    --- log ---"
+        head -30 "$WRAPPER_OUT/run.log"
+        echo "    --- end ---"
+    fi
+    rm -rf "$WRAPPER_OUT"
+else
+    fail "update-anthropic-dashboard.sh wrapper is missing or not executable"
+fi
 
 # --- Summary ---
 echo ""
